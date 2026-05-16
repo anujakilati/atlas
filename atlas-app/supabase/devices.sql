@@ -162,6 +162,7 @@ on conflict (id) do update set public = true;
 
 drop policy if exists "Public read camera feeds" on storage.objects;
 drop policy if exists "Upload camera feeds" on storage.objects;
+drop policy if exists "Update camera feeds" on storage.objects;
 
 create policy "Public read camera feeds"
   on storage.objects for select to anon, authenticated
@@ -169,6 +170,11 @@ create policy "Public read camera feeds"
 
 create policy "Upload camera feeds"
   on storage.objects for insert to anon, authenticated
+  with check (bucket_id = 'camera-feeds');
+
+create policy "Update camera feeds"
+  on storage.objects for update to anon, authenticated
+  using (bucket_id = 'camera-feeds')
   with check (bucket_id = 'camera-feeds');
 
 notify pgrst, 'reload schema';

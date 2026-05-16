@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { liveFeedStoragePath, publicStorageUrl } from "@/lib/devices";
+import { fetchDeviceRecordings, liveFeedStoragePath, publicStorageUrl } from "@/lib/devices";
 
-/** Polls the latest uploaded live.webm chunk from Supabase Storage. */
+/**
+ * Cloud fallback when WebRTC has no frames yet.
+ * Uses the latest saved clip (valid webm) first; falls back to live.webm chunk.
+ */
 export function useStorageLiveFeed(deviceId: string | null, enabled: boolean) {
   const [src, setSrc] = useState<string | null>(null);
 
@@ -11,11 +14,23 @@ export function useStorageLiveFeed(deviceId: string | null, enabled: boolean) {
       return;
     }
 
-    const base = publicStorageUrl(liveFeedStoragePath(deviceId));
-    const refresh = () => setSrc(`${base}?t=${Date.now()}`);
+    const refresh = async () => {
+      const cacheBust = Date.now();
+      try {
+        const recordings = await fetchDeviceRecordings(deviceId);
+        if (recordings[0]?.publicUrl) {
+          setSrc(`${recordings[0].publicUrl}?t=${cacheBust}`);
+          return;
+        }
+      } catch {
+        // fall through to live chunk
+      }
+      const liveUrl = publicStorageUrl(liveFeedStoragePath(deviceId));
+      setSrc(`${liveUrl}?t=${cacheBust}`);
+    };
 
-    refresh();
-    const id = setInterval(refresh, 5000);
+    void refresh();
+    const id = setInterval(() => void refresh(), 5000);
     return () => clearInterval(id);
   }, [deviceId, enabled]);
 
