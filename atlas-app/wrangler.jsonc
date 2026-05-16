@@ -1,7 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "atlas-vault",
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  // Optional: set in Dashboard instead. Vite bakes VITE_* in at build time — use `npm run deploy`.
+  // "vars": {
+  //   "VITE_SUPABASE_URL": "https://YOUR_PROJECT.supabase.co",
+  //   "VITE_SUPABASE_ANON_KEY": "your_anon_key"
+  // }
 }

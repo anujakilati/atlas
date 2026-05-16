@@ -4,6 +4,7 @@ import { getBubbleInviteToken } from "@/lib/bubbles";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -52,6 +53,9 @@ export function AddMemberDialog({ bubbleId, bubbleName, open, onOpenChange }: Ad
       <DialogContent className="border-border bg-card sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">Add member</DialogTitle>
+          <DialogDescription className="sr-only">
+            Share an invite code so others can join this bubble.
+          </DialogDescription>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           Share this code so others can join <span className="text-foreground">{bubbleName}</span>.
