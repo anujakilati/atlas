@@ -11,6 +11,7 @@ import {
 import { CameraDeviceSelector } from "@/components/devices/CameraDeviceSelector";
 import { CameraIndividualView } from "@/components/devices/CameraIndividualView";
 import { CameraGridView } from "@/components/devices/CameraGridView";
+import { YoloWatchView } from "@/components/devices/YoloWatchView";
 
 export const Route = createFileRoute("/vault/$bubbleId/camera")({
   component: CameraPage,
@@ -22,7 +23,7 @@ export const Route = createFileRoute("/vault/$bubbleId/camera")({
   }),
 });
 
-type Tab = "individual" | "full";
+type Tab = "individual" | "full" | "ai-watch";
 
 function pickActiveDevice(list: Device[], prev: Device | null): Device | null {
   if (prev && list.some((d) => d.id === prev.id)) return prev;
@@ -111,7 +112,7 @@ function CameraPage() {
       <header>
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Live view</p>
         <h1 className="mt-1 font-display text-3xl">
-          {tab === "individual" ? (active?.name ?? "Cameras") : "All Cameras"}
+          {tab === "individual" ? (active?.name ?? "Cameras") : tab === "ai-watch" ? "AI Watch" : "All Cameras"}
         </h1>
         {tab === "individual" && active ? (
           <p className="mt-0.5 text-sm text-muted-foreground">{active.placement}</p>
@@ -119,7 +120,7 @@ function CameraPage() {
       </header>
 
       <div className="mt-5 flex gap-2">
-        {(["individual", "full"] as Tab[]).map((t) => (
+        {(["individual", "full", "ai-watch"] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -130,7 +131,7 @@ function CameraPage() {
                 : "border-border bg-card text-muted-foreground"
             }`}
           >
-            {t === "individual" ? "Individual" : "Full View"}
+            {t === "individual" ? "Individual Live Feed" : t === "full" ? "Full View" : "AI Watch"}
           </button>
         ))}
       </div>
@@ -139,6 +140,7 @@ function CameraPage() {
         {tab === "individual" ? (
           <CameraIndividualView
             active={active}
+            bubbleId={bubbleId}
             recordings={recordings}
             muted={muted}
             onMutedChange={setMuted}
@@ -148,21 +150,25 @@ function CameraPage() {
             deleteError={deleteRecordingError}
             loading={loading}
           />
+        ) : tab === "ai-watch" ? (
+          <YoloWatchView />
         ) : (
           <CameraGridView devices={devices} muted={muted} onMutedChange={setMuted} />
         )}
       </div>
 
-      <div className="mt-5">
-        <CameraDeviceSelector
-          devices={devices}
-          activeId={active?.id ?? null}
-          onSelect={setActive}
-          loading={loading || deletingDeviceId !== null}
-        />
-      </div>
+      {tab !== "ai-watch" && (
+        <div className="mt-5">
+          <CameraDeviceSelector
+            devices={devices}
+            activeId={active?.id ?? null}
+            onSelect={setActive}
+            loading={loading || deletingDeviceId !== null}
+          />
+        </div>
+      )}
 
-      {devices.length > 1 ? (
+      {devices.length > 1 && tab !== "ai-watch" ? (
         <p className="mt-2 text-center text-xs text-muted-foreground">
           Each camera needs its own device tab open with its token. Only one camera per browser.
         </p>

@@ -25,6 +25,11 @@ def init_db(db_path: str):
 def insert_event(db_path: str, event: Dict[str, Any]):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL, label TEXT, score REAL, bbox TEXT,
+        frame_path TEXT, clip_path TEXT, meta TEXT
+    )''')
     cur.execute('''INSERT INTO events (ts,label,score,bbox,frame_path,clip_path,meta)
     VALUES (?,?,?,?,?,?,?)''', (
         event.get("ts"), event.get("label"), event.get("score"), str(event.get("bbox")), event.get("frame_path"), event.get("clip_path"), str(event.get("meta"))
@@ -37,6 +42,11 @@ def insert_event(db_path: str, event: Dict[str, Any]):
 def list_events(db_path: str, limit: int = 100):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL, label TEXT, score REAL, bbox TEXT,
+        frame_path TEXT, clip_path TEXT, meta TEXT
+    )''')
     cur.execute('SELECT id, ts, label, score, bbox, frame_path, clip_path, meta FROM events ORDER BY ts DESC LIMIT ?', (limit,))
     rows = cur.fetchall()
     conn.close()

@@ -17,6 +17,10 @@ def load_config():
     cfg["storage"]["db_path"] = os.getenv("DB_PATH", cfg["storage"].get("db_path", "./data/events.db"))
     cfg["vlm"] = cfg.get("vlm", {})
     cfg["vlm"]["endpoint"] = os.getenv("NEMOTRON_URL", cfg["vlm"].get("endpoint"))
+    cfg["action_agent"] = {
+        "security_webhook_url": os.getenv("SECURITY_WEBHOOK_URL", ""),
+        "nemoclaw_enabled": os.getenv("NEMOCLAW_ENABLED", "1") != "0",
+    }
     return cfg
 
 CONFIG = load_config()

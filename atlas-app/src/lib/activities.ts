@@ -30,9 +30,9 @@ function authHeaders() {
   };
 }
 
-export async function fetchDeviceEvents(): Promise<DeviceEvent[]> {
+export async function fetchDeviceEvents(bubbleId: string): Promise<DeviceEvent[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/device_events?select=*&order=created_at.desc&limit=100`,
+    `${SUPABASE_URL}/rest/v1/device_events?select=*&bubble=eq.${bubbleId}&order=created_at.desc&limit=100`,
     { headers: authHeaders() }
   );
   if (!res.ok) {

@@ -14,7 +14,8 @@ class VideoIngester:
 
     async def start(self, frame_queue: asyncio.Queue):
         loop = asyncio.get_event_loop()
-        self.cap = cv2.VideoCapture(self.source)
+        _src = int(self.source) if str(self.source).isdigit() else self.source
+        self.cap = cv2.VideoCapture(_src)
         if not self.cap.isOpened():
             logger.error("Unable to open source %s", self.source)
             return
@@ -25,7 +26,16 @@ class VideoIngester:
         while True:
             ret, frame = await loop.run_in_executor(None, self.cap.read)
             if not ret:
-                break
+                logger.warning("Stream lost, reconnecting %s in 2s", self.source)
+                self.cap.release()
+                await asyncio.sleep(2)
+                self.cap = cv2.VideoCapture(_src)
+                if not self.cap.isOpened():
+                    logger.error("Reconnect failed for %s — stopping ingester", self.source)
+                    break
+                fps = self.cap.get(cv2.CAP_PROP_FPS) or 10
+                skip = max(1, int(fps / max(0.1, self.target_fps)))
+                continue
             if idx % skip == 0:
                 if frame_queue.qsize() < self.max_queue:
                     await frame_queue.put((time.time(), idx, fps, frame))

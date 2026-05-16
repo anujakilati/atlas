@@ -254,6 +254,36 @@ export async function fetchDeviceRecordings(deviceId: string) {
   })) satisfies DeviceRecording[];
 }
 
+export async function fetchBubbleRecordings(bubbleId: string): Promise<DeviceRecording[]> {
+  // Fetch all device IDs for this bubble first, then batch-fetch their recordings.
+  const { data: deviceRows, error: devErr } = await supabase
+    .from("devices")
+    .select("id")
+    .eq("bubble", bubbleId);
+
+  if (devErr) throw new Error(formatDbError(devErr, "Could not load devices."));
+  const deviceIds = (deviceRows ?? []).map((r) => r.id as string);
+  if (deviceIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("device_recordings")
+    .select("id, device, storage_path, duration_ms, created_at")
+    .in("device", deviceIds)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) throw new Error(formatDbError(error, "Could not load recordings."));
+
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    deviceId: row.device as string,
+    storagePath: row.storage_path as string,
+    publicUrl: publicStorageUrl(row.storage_path as string),
+    durationMs: row.duration_ms as number | null,
+    createdAt: row.created_at as string,
+  }));
+}
+
 export async function deleteRecording(recordingId: string, storagePath: string) {
   // Delete from storage first
   const { error: storageError } = await supabase.storage.from(BUCKET).remove([storagePath]);

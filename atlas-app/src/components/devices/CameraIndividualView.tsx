@@ -1,6 +1,8 @@
-import { Play, Trash2, Video, Minus } from "lucide-react";
+import { Video, Minus } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Device, DeviceRecording } from "@/lib/devices";
 import { DeviceLivePlayer } from "./DeviceLivePlayer";
+import { supabase } from "@/lib/supabase";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,8 +15,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
+const SERVICE_KEY = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+
 type Props = {
   active: Device | null;
+  bubbleId: string;
   recordings: DeviceRecording[];
   muted: boolean;
   onMutedChange: (muted: boolean) => void;
@@ -27,6 +33,7 @@ type Props = {
 
 export function CameraIndividualView({
   active,
+  bubbleId,
   recordings,
   muted,
   onMutedChange,
@@ -36,9 +43,78 @@ export function CameraIndividualView({
   deleteError,
   loading,
 }: Props) {
+  const [locked, setLocked] = useState(false);
+  const [lockMessage, setLockMessage] = useState<string | undefined>();
+
+  // Subscribe to camera_lock / camera_unlock events via Supabase Realtime
+  useEffect(() => {
+    if (!active?.id) return;
+
+    const channel = supabase
+      .channel(`camera-lock-${active.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "device_events",
+          filter: `device=eq.${active.id}`,
+        },
+        (payload) => {
+          const row = payload.new as { event_type: string; metadata?: Record<string, unknown> };
+          if (row.event_type === "camera_lock") {
+            setLocked(true);
+            setLockMessage((row.metadata?.message as string | undefined) ?? undefined);
+          } else if (row.event_type === "camera_unlock") {
+            setLocked(false);
+            setLockMessage(undefined);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [active?.id]);
+
+  const handleUnlock = async () => {
+    if (!active?.id || !SUPABASE_URL || !SERVICE_KEY) {
+      setLocked(false);
+      setLockMessage(undefined);
+      return;
+    }
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/device_events`, {
+        method: "POST",
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          bubble: bubbleId,
+          device: active.id,
+          event_type: "camera_unlock",
+          incident_confirmed: false,
+          metadata: { source: "operator", action: "manual_unlock" },
+        }),
+      });
+    } catch {
+      // optimistically unlock even if the insert fails
+    }
+    setLocked(false);
+    setLockMessage(undefined);
+  };
+
   return (
     <>
-      <div className="relative aspect-[4/5] overflow-hidden rounded-3xl border border-border bg-black">
+      <div
+        className={`relative aspect-[4/5] overflow-hidden rounded-3xl border bg-black transition-colors ${
+          locked ? "border-danger" : "border-border"
+        }`}
+      >
         {active ? (
           <DeviceLivePlayer
             key={active.id}
@@ -47,10 +123,13 @@ export function CameraIndividualView({
             deviceOnline={active.status === "online"}
             muted={muted}
             onMutedChange={onMutedChange}
+            locked={locked}
+            lockMessage={lockMessage}
+            onUnlock={handleUnlock}
           />
         ) : null}
 
-        {active ? (
+        {active && !locked ? (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
@@ -91,55 +170,6 @@ export function CameraIndividualView({
         ) : null}
       </div>
 
-      <section className="mt-7">
-        <h2 className="font-display text-2xl">Recordings</h2>
-        {deleteError ? (
-          <div className="mt-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            {deleteError}
-          </div>
-        ) : null}
-        {recordings.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Clips appear here while the device camera is streaming.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {recordings.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3">
-                <a
-                  href={r.publicUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid h-12 w-12 place-items-center rounded-xl bg-accent text-foreground"
-                >
-                  <Play className="h-4 w-4" />
-                </a>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{active?.name ?? "Camera"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {r.durationMs ? (
-                    <span className="text-xs text-muted-foreground">
-                      {Math.round(r.durationMs / 1000)}s
-                    </span>
-                  ) : null}
-                  <button
-                    onClick={() => onDeleteRecording(r.id, r.storagePath)}
-                    disabled={deletingId === r.id}
-                    className="p-2 text-muted-foreground hover:text-destructive disabled:opacity-50 transition-colors"
-                    aria-label="Delete recording"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </>
   );
 }

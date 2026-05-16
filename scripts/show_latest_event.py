@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 # Ensure project root is on sys.path so `backend` package imports work when
@@ -28,6 +29,7 @@ if _env_path.exists():
 from backend.storage import db
 from backend.config import CONFIG
 from backend.utils.logger import get_logger
+from scripts.yolo_watch import start_server, stop_server, push_frame
 import cv2
 import numpy as np
 
@@ -641,6 +643,7 @@ def main():
     args = parser.parse_args()
 
     dpath = CONFIG['storage']['db_path']
+    db.init_db(dpath)  # no-op if table already exists
     events = db.list_events(dpath, limit=500)
     if args.source:
         filtered = []
@@ -760,6 +763,8 @@ def main():
         best_clarity = {"score": 0.0, "frame": None, "bbox": None}
         devnull_out = open(os.devnull, 'w')
         devnull_err = open(os.devnull, 'w')
+
+        mjpeg_server = start_server()
         try:
             with contextlib.redirect_stdout(devnull_out), contextlib.redirect_stderr(devnull_err):
                 while current <= end_frame:
@@ -795,10 +800,17 @@ def main():
                         tracked_suspects = next_tracked[:]
 
                     writer.write(frame_out)
+
+                    # Stream annotated frame to the AI Watch tab
+                    enc_ok, buf = cv2.imencode('.jpg', frame_out, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if enc_ok:
+                        push_frame(buf.tobytes())
+
                     current += 1
         finally:
             devnull_out.close()
             devnull_err.close()
+            stop_server(mjpeg_server)
         writer.release()
         cap.release()
 
