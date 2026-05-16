@@ -23,12 +23,25 @@ if (projectRef && !supabaseUrl.includes(projectRef)) {
   );
 }
 
+// During SSR (Node.js dev server), WebSocketFactory.getWebSocketConstructor() throws
+// because Node.js < 22 has no native WebSocket. Provide a stub transport to skip
+// that check. Auth is also configured to avoid browser-only APIs on the server.
+const isBrowser = typeof window !== "undefined";
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+    persistSession: isBrowser,
+    autoRefreshToken: isBrowser,
+    detectSessionInUrl: isBrowser,
+    skipAutoInitialize: !isBrowser,
   },
+  ...(!isBrowser && {
+    realtime: {
+      // Realtime is browser-only; this stub prevents the WebSocket constructor
+      // lookup from throwing when the client is instantiated during SSR.
+      transport: class NoopWS {} as unknown as typeof WebSocket,
+    },
+  }),
 });
 
 export async function clearLocalAuthSession() {

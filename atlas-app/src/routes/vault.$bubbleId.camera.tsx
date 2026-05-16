@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Play, Video, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchBubbleDevices,
   fetchDeviceRecordings,
   deleteRecording,
+  deleteDevice,
   type Device,
   type DeviceRecording,
 } from "@/lib/devices";
-import { DeviceLivePlayer } from "@/components/devices/DeviceLivePlayer";
+import { CameraDeviceSelector } from "@/components/devices/CameraDeviceSelector";
+import { CameraIndividualView } from "@/components/devices/CameraIndividualView";
+import { CameraGridView } from "@/components/devices/CameraGridView";
 
 export const Route = createFileRoute("/vault/$bubbleId/camera")({
   component: CameraPage,
@@ -19,6 +21,8 @@ export const Route = createFileRoute("/vault/$bubbleId/camera")({
     ],
   }),
 });
+
+type Tab = "individual" | "full";
 
 function pickActiveDevice(list: Device[], prev: Device | null): Device | null {
   if (prev && list.some((d) => d.id === prev.id)) return prev;
@@ -32,8 +36,10 @@ function CameraPage() {
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<Device | null>(null);
   const [muted, setMuted] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("individual");
+  const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
+  const [deleteRecordingError, setDeleteRecordingError] = useState<string | null>(null);
+  const [deletingDeviceId, setDeletingDeviceId] = useState<string | null>(null);
 
   const refreshDevices = useCallback(() => {
     void fetchBubbleDevices(bubbleId)
@@ -71,17 +77,32 @@ function CameraPage() {
   }, [active?.id]);
 
   const handleDeleteRecording = async (recordingId: string, storagePath: string) => {
-    setDeletingId(recordingId);
-    setDeleteError(null);
+    setDeletingRecordingId(recordingId);
+    setDeleteRecordingError(null);
     try {
       await deleteRecording(recordingId, storagePath);
       setRecordings((prev) => prev.filter((r) => r.id !== recordingId));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete recording";
-      console.error("Delete recording error:", error);
-      setDeleteError(message);
+      setDeleteRecordingError(message);
     } finally {
-      setDeletingId(null);
+      setDeletingRecordingId(null);
+    }
+  };
+
+  const handleDeleteDevice = async (device: Device) => {
+    setDeletingDeviceId(device.id);
+    try {
+      await deleteDevice(device.id, bubbleId);
+      setDevices((prev) => {
+        const next = prev.filter((d) => d.id !== device.id);
+        setActive((prevActive) => pickActiveDevice(next, prevActive?.id === device.id ? null : prevActive));
+        return next;
+      });
+    } catch (error) {
+      console.error("Delete device error:", error);
+    } finally {
+      setDeletingDeviceId(null);
     }
   };
 
@@ -89,58 +110,56 @@ function CameraPage() {
     <div className="px-5 pt-12">
       <header>
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Live view</p>
-        <h1 className="mt-1 font-display text-3xl">{active?.name ?? "Cameras"}</h1>
-        {active ? <p className="mt-0.5 text-sm text-muted-foreground">{active.placement}</p> : null}
+        <h1 className="mt-1 font-display text-3xl">
+          {tab === "individual" ? (active?.name ?? "Cameras") : "All Cameras"}
+        </h1>
+        {tab === "individual" && active ? (
+          <p className="mt-0.5 text-sm text-muted-foreground">{active.placement}</p>
+        ) : null}
       </header>
 
-      <div className="relative mt-5 aspect-[4/5] overflow-hidden rounded-3xl border border-border bg-black">
-        {active ? (
-          <DeviceLivePlayer
-            key={active.id}
-            deviceId={active.id}
-            deviceName={active.name}
-            deviceOnline={active.status === "online"}
-            muted={muted}
-            onMutedChange={setMuted}
-          />
-        ) : null}
-
-        {(!active && !loading) ? (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-zinc-900 via-zinc-800 to-black p-6 text-center">
-            <Video className="h-10 w-10 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              No cameras yet. Add a device and register it with a token.
-            </p>
-          </div>
-        ) : null}
+      <div className="mt-5 flex gap-2">
+        {(["individual", "full"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`cursor-pointer rounded-full border px-4 py-1.5 text-xs transition ${
+              tab === t
+                ? "border-transparent bg-gradient-gold text-gold-foreground shadow-gold"
+                : "border-border bg-card text-muted-foreground"
+            }`}
+          >
+            {t === "individual" ? "Individual" : "Full View"}
+          </button>
+        ))}
       </div>
 
-      <div className="mt-5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {loading ? (
-          <p className="text-xs text-muted-foreground">Loading cameras…</p>
+      <div className="mt-5">
+        {tab === "individual" ? (
+          <CameraIndividualView
+            active={active}
+            recordings={recordings}
+            muted={muted}
+            onMutedChange={setMuted}
+            onDeleteRecording={handleDeleteRecording}
+            onDeleteDevice={handleDeleteDevice}
+            deletingId={deletingRecordingId}
+            deleteError={deleteRecordingError}
+            loading={loading}
+          />
         ) : (
-          devices.map((c) => {
-            const isActive = c.id === active?.id;
-            const live = c.status === "online";
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setActive(c)}
-                className={`shrink-0 rounded-full border px-4 py-2 text-xs transition ${
-                  isActive
-                    ? "border-transparent bg-gradient-gold text-gold-foreground shadow-gold"
-                    : "border-border bg-card text-muted-foreground"
-                }`}
-              >
-                <span
-                  className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-success" : "bg-muted-foreground"}`}
-                />
-                {c.name}
-              </button>
-            );
-          })
+          <CameraGridView devices={devices} muted={muted} onMutedChange={setMuted} />
         )}
+      </div>
+
+      <div className="mt-5">
+        <CameraDeviceSelector
+          devices={devices}
+          activeId={active?.id ?? null}
+          onSelect={setActive}
+          loading={loading || deletingDeviceId !== null}
+        />
       </div>
 
       {devices.length > 1 ? (
@@ -148,56 +167,6 @@ function CameraPage() {
           Each camera needs its own device tab open with its token. Only one camera per browser.
         </p>
       ) : null}
-
-      <section className="mt-7">
-        <h2 className="font-display text-2xl">Recordings</h2>
-        {deleteError ? (
-          <div className="mt-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            {deleteError}
-          </div>
-        ) : null}
-        {recordings.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Clips appear here while the device camera is streaming.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {recordings.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3">
-                <a
-                  href={r.publicUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid h-12 w-12 place-items-center rounded-xl bg-accent text-foreground"
-                >
-                  <Play className="h-4 w-4" />
-                </a>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{active?.name ?? "Camera"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {r.durationMs ? (
-                    <span className="text-xs text-muted-foreground">
-                      {Math.round(r.durationMs / 1000)}s
-                    </span>
-                  ) : null}
-                  <button
-                    onClick={() => handleDeleteRecording(r.id, r.storagePath)}
-                    disabled={deletingId === r.id}
-                    className="p-2 text-muted-foreground hover:text-destructive disabled:opacity-50 transition-colors"
-                    aria-label="Delete recording"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   );
 }
