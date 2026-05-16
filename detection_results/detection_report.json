@@ -1,0 +1,17 @@
+{
+  "video": "/Users/ananyaj/atlas/atlas-app/video1.MOV",
+  "total_frames": 276,
+  "fps": 59.97826874320898,
+  "duration": 4.601666666666667,
+  "disappeared_objects": [
+    {
+      "id": 4,
+      "class": "person",
+      "first_frame": 110,
+      "last_frame": 174,
+      "frames_seen": 48,
+      "confidence": 0.5151342153549194
+    }
+  ],
+  "suspicious_events": 1
+}

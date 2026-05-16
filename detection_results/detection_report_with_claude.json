@@ -1,0 +1,17 @@
+{
+  "video": "/Users/ananyaj/atlas/atlas-app/video1.MOV",
+  "total_frames": 276,
+  "fps": 59.97826874320898,
+  "duration": 4.601666666666667,
+  "disappeared_objects": [
+    {
+      "id": 4,
+      "yolo_detection": "person",
+      "claude_identification": "person",
+      "first_frame": 110,
+      "last_frame": 174,
+      "duration_seconds": 1.0670531400966183,
+      "frames_seen": 48
+    }
+  ]
+}
