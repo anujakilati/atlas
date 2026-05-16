@@ -2,7 +2,9 @@
 """Load latest event, annotate the original video around the suspicious frame,
 save the replay clip, open it, and print a short report."""
 import ast
+import base64
 import contextlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -13,6 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Load environment variables from the root .env file if present.
+_env_path = ROOT / '.env'
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _, _v = _line.partition('=')
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 from backend.storage import db
 from backend.config import CONFIG
 from backend.utils.logger import get_logger
@@ -20,6 +32,30 @@ import cv2
 import numpy as np
 
 logger = get_logger('show_event')
+
+CHARACTER_PROFILE_PROMPT = """\
+You are a security analyst generating a suspect description from surveillance footage.
+Only describe what is clearly visible in the image. Do not guess or infer details you cannot see.
+Use "not visible" for any field you cannot determine with confidence.
+Respond with ONLY valid JSON — no markdown, no extra text:
+
+{
+  "clothing": {
+    "top": "color and type of upper body clothing, or 'not visible'",
+    "bottom": "color and type of lower body clothing, or 'not visible'",
+    "shoes": "footwear description, or 'not visible'",
+    "accessories": "any clearly visible hats, bags, glasses, etc., or 'none visible'"
+  },
+  "physical": {
+    "hair_color": "observed hair color, or 'not visible'",
+    "hair_style": "length and style, or 'not visible'",
+    "approximate_age": "estimated age range if determinable, or 'unknown'",
+    "build": "slim|medium|stocky|athletic, or 'unknown'",
+    "skin_tone": "observed skin tone, or 'not visible'"
+  },
+  "distinguishing_features": "only clearly visible tattoos, scars, or notable items — omit if none are apparent",
+  "summary": "one-sentence description limited to only what is clearly visible in the image"
+}"""
 
 
 def open_replay(path):
@@ -143,6 +179,293 @@ def find_person_bboxes(frame):
             continue
         boxes.append((x1, y1, x2, y2))
     return boxes
+
+
+def find_person_detections(frame):
+    """Return all person detections as ((x1,y1,x2,y2), confidence) tuples."""
+    try:
+        from backend.detectors.yolo_detector import YoloDetector
+    except Exception:
+        return []
+
+    detector = find_person_detections._detector if hasattr(find_person_detections, "_detector") else None
+    if detector is None:
+        detector = YoloDetector('yolov8n.pt', device='cpu')
+        find_person_detections._detector = detector
+
+    with contextlib.redirect_stdout(open(os.devnull, 'w')), contextlib.redirect_stderr(open(os.devnull, 'w')):
+        detections = detector.predict(frame, conf=0.25)
+    results = []
+    for det in detections:
+        if det.get('class') != 0:
+            continue
+        bbox = det.get('bbox') or []
+        if bbox and isinstance(bbox[0], (list, tuple)):
+            x1, y1, x2, y2 = map(int, bbox[0])
+        elif len(bbox) >= 4:
+            x1, y1, x2, y2 = map(int, bbox[:4])
+        else:
+            continue
+        conf = float(det.get('score', 0.0))
+        results.append(((x1, y1, x2, y2), conf))
+    return results
+
+
+def compute_clarity_score(frame, bbox, conf):
+    """Score a detected person crop for suitability as a profile image (0.0–1.0)."""
+    x1, y1, x2, y2 = bbox
+    h, w = frame.shape[:2]
+
+    if conf < 0.60:
+        return 0.0
+    crop = frame[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
+    if crop.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    if laplacian_var < 50:
+        return 0.0
+
+    conf_score = conf
+
+    bbox_area = max(0, x2 - x1) * max(0, y2 - y1)
+    area_score = min(bbox_area / (w * h), 1.0)
+
+    bbox_cx = (x1 + x2) / 2.0
+    bbox_cy = (y1 + y2) / 2.0
+    frame_cx = w / 2.0
+    frame_cy = h / 2.0
+    max_dist = (frame_cx ** 2 + frame_cy ** 2) ** 0.5
+    dist = ((bbox_cx - frame_cx) ** 2 + (bbox_cy - frame_cy) ** 2) ** 0.5
+    centrality_score = 1.0 - min(dist / max_dist, 1.0)
+
+    sharpness_score = min(laplacian_var / 500.0, 1.0)
+
+    return (
+        0.30 * conf_score +
+        0.40 * area_score +
+        0.20 * centrality_score +
+        0.10 * sharpness_score
+    )
+
+
+def crop_person(frame, bbox, padding=0.05):
+    """Crop a person bounding box with proportional padding, clamped to frame bounds."""
+    x1, y1, x2, y2 = bbox
+    h, w = frame.shape[:2]
+    bw = x2 - x1
+    bh = y2 - y1
+    pad_x = int(bw * padding)
+    pad_y = int(bh * padding)
+    cx1 = max(0, x1 - pad_x)
+    cy1 = max(0, y1 - pad_y)
+    cx2 = min(w, x2 + pad_x)
+    cy2 = min(h, y2 + pad_y)
+    return frame[cy1:cy2, cx1:cx2]
+
+
+def frame_to_base64(frame):
+    """Encode a BGR numpy frame as a base64 JPEG string."""
+    ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise RuntimeError("Failed to encode frame as JPEG")
+    return base64.b64encode(buf.tobytes()).decode('utf-8')
+
+
+def analyze_suspect(cropped_frame):
+    """Send a cropped suspect image to Nemotron and return a character profile dict."""
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        logger.warning("NVIDIA_API_KEY not set — skipping character profile analysis")
+        return {}
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        logger.warning("openai package not available — skipping character profile analysis")
+        return {}
+
+    client = OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=api_key,
+    )
+
+    b64 = frame_to_base64(cropped_frame)
+    content = [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        },
+        {"type": "text", "text": CHARACTER_PROFILE_PROMPT},
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model="nvidia/nemotron-nano-12b-v2-vl",
+            messages=[{"role": "user", "content": content}],
+            temperature=0.1,
+            max_tokens=600,
+        )
+        raw = resp.choices[0].message.content.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1].lstrip("json").strip()
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning("Character profile JSON parse error: %s", e)
+        return {}
+    except Exception as e:
+        logger.warning("Character profile analysis failed: %s", e)
+        return {}
+
+
+def print_character_profile(profile, event_id):
+    """Pretty-print the character profile to stdout."""
+    sep = "=" * 60
+    if not profile:
+        print(f"\n{sep}")
+        print(f"  CHARACTER PROFILE — Event {event_id}")
+        print(sep)
+        print("  Analysis unavailable.")
+        print(sep)
+        return
+
+    print(f"\n{sep}")
+    print(f"  CHARACTER PROFILE — Event {event_id}")
+    print(sep)
+
+    clothing = profile.get("clothing", {})
+    if clothing:
+        print("\nCLOTHING")
+        for key, val in clothing.items():
+            print(f"  {key.capitalize():12s}: {val}")
+
+    physical = profile.get("physical", {})
+    if physical:
+        print("\nPHYSICAL DESCRIPTION")
+        for key, val in physical.items():
+            label = key.replace("_", " ").capitalize()
+            print(f"  {label:20s}: {val}")
+
+    features = profile.get("distinguishing_features")
+    if features:
+        print(f"\nDISTINGUISHING FEATURES\n  {features}")
+
+    summary = profile.get("summary")
+    if summary:
+        print(f"\nSUMMARY\n  {summary}")
+
+    print(sep)
+
+
+def upload_crop_to_storage(cropped_frame, event_ts):
+    """Upload a cropped suspect image to Supabase Storage and return its public URL."""
+    import requests as req
+    url = os.environ.get("VITE_SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        return None
+
+    ok, buf = cv2.imencode('.jpg', cropped_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        logger.warning("Failed to encode crop for upload")
+        return None
+
+    bucket = "profiles"
+    filename = f"event_{int(event_ts)}_profile.jpg"
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "image/jpeg",
+    }
+
+    # Create the bucket if it doesn't exist yet (idempotent — ignores 409 conflict).
+    try:
+        req.post(
+            f"{url}/storage/v1/bucket",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"id": bucket, "name": bucket, "public": True},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+    # Upload the image (upsert so re-runs overwrite cleanly).
+    try:
+        resp = req.post(
+            f"{url}/storage/v1/object/{bucket}/{filename}",
+            headers={**headers, "x-upsert": "true"},
+            data=buf.tobytes(),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        public_url = f"{url}/storage/v1/object/public/{bucket}/{filename}"
+        print(f"[Storage] Crop uploaded: {public_url}")
+        return public_url
+    except Exception as e:
+        logger.warning("Failed to upload crop to Supabase Storage: %s", e)
+        return None
+
+
+def _supabase_headers(key):
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+
+
+def push_to_supabase(profile, event_meta, replay_path, crop_url=None):
+    """Insert an activity + character record and link them via activity_characters."""
+    import requests as req
+    sb_url = os.environ.get("VITE_SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not sb_url or not key:
+        logger.warning("VITE_SUPABASE_URL or SUPABASE_SERVICE_KEY not set — skipping Supabase push")
+        return
+
+    headers = _supabase_headers(key)
+    return_headers = {**headers, "Prefer": "return=representation"}
+
+    # 1. Insert the moment into activities
+    activity_row = {
+        "recording_url": replay_path,
+        "cam_name": event_meta.get("cam_name") or event_meta.get("source", "unknown"),
+        "reason": "suspicious_person",
+    }
+    try:
+        resp = req.post(f"{sb_url}/rest/v1/activities", headers=return_headers, json=activity_row, timeout=10)
+        resp.raise_for_status()
+        activity_id = resp.json()[0]["id"]
+    except Exception as e:
+        logger.warning("Failed to insert activity: %s", e)
+        return
+
+    # 2. Insert the suspect into characters
+    summary = profile.get("summary", "") if profile else ""
+    character_row = {
+        "sus_character_description": summary,
+        "profile_crop_url": crop_url,
+    }
+    try:
+        resp = req.post(f"{sb_url}/rest/v1/characters", headers=return_headers, json=character_row, timeout=10)
+        resp.raise_for_status()
+        character_id = resp.json()[0]["id"]
+    except Exception as e:
+        logger.warning("Failed to insert character: %s", e)
+        return
+
+    # 3. Link them in the junction table
+    try:
+        resp = req.post(
+            f"{sb_url}/rest/v1/activity_characters",
+            headers={**headers, "Prefer": "return=minimal"},
+            json={"activity_id": activity_id, "character_id": character_id},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        print(f"[Supabase] Activity {activity_id} linked to character {character_id}.")
+    except Exception as e:
+        logger.warning("Failed to link activity and character: %s", e)
 
 
 def main():
@@ -269,6 +592,7 @@ def main():
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         current = start_frame
         tracked_suspects = suspect_seeds[:]
+        best_clarity = {"score": 0.0, "frame": None, "bbox": None}
         devnull_out = open(os.devnull, 'w')
         devnull_err = open(os.devnull, 'w')
         try:
@@ -278,14 +602,23 @@ def main():
                     if not ok or frame is None:
                         break
 
-                    person_boxes = find_person_bboxes(frame)
+                    detections = find_person_detections(frame)
                     frame_out = frame.copy()
                     next_tracked = []
 
-                    for box in person_boxes:
+                    seeding_failed = not tracked_suspects
+
+                    for (box, conf) in detections:
                         iou = max((bbox_iou(box, seed) for seed in tracked_suspects), default=0.0)
-                        if iou >= 0.20:
+                        is_suspect = iou >= 0.20 or seeding_failed
+
+                        if is_suspect:
                             next_tracked.append(box)
+                            clarity = compute_clarity_score(frame, box, conf)
+                            if clarity > best_clarity["score"]:
+                                best_clarity["score"] = clarity
+                                best_clarity["frame"] = frame.copy()
+                                best_clarity["bbox"] = box
 
                         x1, y1, x2, y2 = box
                         if iou >= 0.20:
@@ -303,7 +636,38 @@ def main():
             devnull_err.close()
         writer.release()
         cap.release()
+
+        # --- Character profile generation ---
+        if best_clarity["frame"] is not None:
+            print(f"\n[Character Profile] Best clarity score: {best_clarity['score']:.3f}")
+            cropped = crop_person(best_clarity["frame"], best_clarity["bbox"])
+            profile = analyze_suspect(cropped)
+            print_character_profile(profile, int(ts))
+
+            profiles_dir = os.path.join(CONFIG['storage']['frames_dir'], 'profiles')
+            os.makedirs(profiles_dir, exist_ok=True)
+            profile_img_path = os.path.join(profiles_dir, f'event_{int(ts)}_profile.jpg')
+            cv2.imwrite(profile_img_path, cropped)
+            print(f"[Character Profile] Crop saved to: {profile_img_path}")
+
+            crop_url = upload_crop_to_storage(cropped, ts)
+            push_to_supabase(profile, meta_obj, replay_path, crop_url=crop_url)
+        else:
+            print("\n[Character Profile] No clear suspect frame found during replay.")
+
         open_replay(replay_path)
+
+    # Clean up raw suspicious frames — keep only profile crops in profiles/
+    frames_dir = Path(CONFIG['storage']['frames_dir'])
+    removed = 0
+    for f in frames_dir.glob("susp_*.jpg"):
+        try:
+            f.unlink()
+            removed += 1
+        except Exception:
+            pass
+    if removed:
+        print(f"[Cleanup] Removed {removed} raw frame(s) from {frames_dir}")
 
 
 if __name__ == '__main__':
