@@ -19,7 +19,7 @@ export function AppShell() {
 
   const tabs = bubbleId
     ? [
-        { to: "/vault/$bubbleId/" as const, label: "Home", icon: Home },
+        { to: "/vault/$bubbleId" as const, label: "Home", icon: Home },
         { to: "/vault/$bubbleId/camera" as const, label: "Camera", icon: Video },
         { to: "/vault/$bubbleId/activity" as const, label: "Activity", icon: ScrollText },
         { to: "/vault/$bubbleId/commands" as const, label: "AI", icon: Sparkles },
