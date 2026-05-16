@@ -9,11 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as CommandsRouteImport } from './routes/commands'
 import { Route as CameraRouteImport } from './routes/camera'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CommandsRoute = CommandsRouteImport.update({
   id: '/commands',
   path: '/commands',
@@ -40,12 +52,16 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ActivityRoute
   '/camera': typeof CameraRoute
   '/commands': typeof CommandsRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/camera': typeof CameraRoute
   '/commands': typeof CommandsRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +69,22 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/camera': typeof CameraRoute
   '/commands': typeof CommandsRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/activity' | '/camera' | '/commands'
+  fullPaths: '/' | '/activity' | '/camera' | '/commands' | '/login' | '/signup'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/activity' | '/camera' | '/commands'
-  id: '__root__' | '/' | '/activity' | '/camera' | '/commands'
+  to: '/' | '/activity' | '/camera' | '/commands' | '/login' | '/signup'
+  id:
+    | '__root__'
+    | '/'
+    | '/activity'
+    | '/camera'
+    | '/commands'
+    | '/login'
+    | '/signup'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,10 +92,26 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   CameraRoute: typeof CameraRoute
   CommandsRoute: typeof CommandsRoute
+  LoginRoute: typeof LoginRoute
+  SignupRoute: typeof SignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/commands': {
       id: '/commands'
       path: '/commands'
@@ -107,6 +148,8 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   CameraRoute: CameraRoute,
   CommandsRoute: CommandsRoute,
+  LoginRoute: LoginRoute,
+  SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

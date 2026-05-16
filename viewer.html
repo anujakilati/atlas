@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Monitor - Video Archive</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Signature gold */
+            --gold: oklch(0.78 0.11 78);
+            --gold-foreground: oklch(0.18 0.008 60);
+
+            --danger: oklch(0.65 0.2 25);
+            --success: oklch(0.75 0.14 155);
+
+            --border: oklch(0.3 0.01 60 / 0.6);
+            --ring: oklch(0.78 0.11 78 / 0.5);
+
+            --gradient-gold: linear-gradient(135deg, oklch(0.82 0.12 80), oklch(0.62 0.1 60));
+            --gradient-surface: linear-gradient(160deg, oklch(0.24 0.012 60), oklch(0.18 0.008 60));
+            --gradient-glow: radial-gradient(120% 80% at 50% 0%, oklch(0.78 0.11 78 / 0.18), transparent 60%);
+
+            --shadow-soft: 0 10px 40px -10px oklch(0 0 0 / 0.5);
+            --shadow-gold: 0 8px 30px -8px oklch(0.78 0.11 78 / 0.4);
+
+            --background: oklch(0.18 0.008 60);
+            --foreground: oklch(0.96 0.01 80);
+
+            --card: oklch(0.22 0.01 60);
+            --card-foreground: oklch(0.96 0.01 80);
+
+            --muted: oklch(0.26 0.01 60);
+            --muted-foreground: oklch(0.7 0.015 70);
+
+            --primary: oklch(0.96 0.01 80);
+            --primary-foreground: oklch(0.18 0.008 60);
+
+            --accent: oklch(0.28 0.012 60);
+            --accent-foreground: oklch(0.96 0.01 80);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--gradient-surface);
+            color: var(--foreground);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Header */
+        .header {
+            margin-bottom: 3rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            opacity: 0.5;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: inline-block;
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: oklch(0.22 0.01 60 / 0.8);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--muted-foreground);
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--gold);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 250px;
+            padding: 0.75rem 1.25rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            color: var(--foreground);
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--gold);
+            background: oklch(0.24 0.012 60);
+            box-shadow: 0 0 0 3px var(--ring);
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .filter-btn {
+            padding: 0.75rem 1.25rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            color: var(--foreground);
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .filter-btn:hover {
+            border-color: var(--gold);
+            background: oklch(0.26 0.01 60);
+        }
+
+        .filter-btn.active {
+            background: var(--gradient-gold);
+            color: var(--gold-foreground);
+            border-color: var(--gold);
+            box-shadow: var(--shadow-gold);
+        }
+
+        /* Video Log Grid */
+        .logs-container {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .log-entry {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            transition: all 0.3s cubic-bezier(0.23, 1, 0.320, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .log-entry::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--priority-color);
+        }
+
+        .log-entry:hover {
+            border-color: var(--gold);
+            background: oklch(0.24 0.012 60);
+            transform: translateX(4px);
+            box-shadow: var(--shadow-gold);
+        }
+
+        .log-entry.priority-high { --priority-color: var(--danger); }
+        .log-entry.priority-medium { --priority-color: oklch(0.7 0.18 70); }
+        .log-entry.priority-low { --priority-color: var(--success); }
+
+        /* Time Column */
+        .log-time {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            min-width: 150px;
+        }
+
+        .log-date {
+            font-weight: 600;
+            color: var(--gold);
+            font-size: 0.95rem;
+            letter-spacing: 0.5px;
+        }
+
+        .log-time-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--foreground);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Activity Column */
+        .log-activity {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .log-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--foreground);
+        }
+
+        .log-description {
+            color: var(--muted-foreground);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .log-tags {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.35rem 0.75rem;
+            background: var(--accent);
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--muted-foreground);
+        }
+
+        /* Priority Badge */
+        .priority-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--priority-bg, var(--card));
+            border: 1px solid var(--priority-color);
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--priority-color);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .log-entry.priority-high .priority-badge {
+            --priority-bg: oklch(0.65 0.2 25 / 0.1);
+        }
+
+        .log-entry.priority-medium .priority-badge {
+            --priority-bg: oklch(0.7 0.18 70 / 0.1);
+        }
+
+        .log-entry.priority-low .priority-badge {
+            --priority-bg: oklch(0.75 0.14 155 / 0.1);
+        }
+
+        .priority-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--priority-color);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .log-entry.priority-low .priority-dot {
+            animation: none;
+            opacity: 0.7;
+        }
+
+        /* Timeline */
+        .timeline-section {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .timeline-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 1rem;
+        }
+
+        /* Stats */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            padding: 1.25rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--muted-foreground);
+            margin-top: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--muted-foreground);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            h1 {
+                font-size: 1.75rem;
+            }
+
+            .log-entry {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .controls {
+                flex-direction: column;
+            }
+
+            .search-box {
+                min-width: 100%;
+            }
+
+            .filter-group {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-content">
+                <h1>🎥 CCTV Monitor</h1>
+                <div class="live-indicator">
+                    <div class="pulse"></div>
+                    <span>Archive Viewer</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total">24</div>
+                <div class="stat-label">Total Events</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-high">3</div>
+                <div class="stat-label">High Priority</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-medium">7</div>
+                <div class="stat-label">Medium Priority</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-low">14</div>
+                <div class="stat-label">Low Priority</div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <input type="text" class="search-box" id="searchInput" placeholder="Search by activity, location, or timestamp...">
+            <div class="filter-group">
+                <button class="filter-btn active" data-filter="all">All Priority</button>
+                <button class="filter-btn" data-filter="high">High</button>
+                <button class="filter-btn" data-filter="medium">Medium</button>
+                <button class="filter-btn" data-filter="low">Low</button>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="logs-container" id="logsContainer"></div>
+    </div>
+
+    <script>
+        // Mock data
+        const videoLogs = [
+            {
+                id: 1,
+                date: '2026-05-15',
+                time: '14:32:15',
+                title: 'Person Detected',
+                description: 'Unauthorized person detected near main entrance. Quick movement detected.',
+                activity: 'Intrusion Alert',
+                priority: 'high',
+                location: 'Main Entrance',
+                tags: ['Motion', 'Person', 'Alert']
+            },
+            {
+                id: 2,
+                date: '2026-05-15',
+                time: '13:47:22',
+                title: 'Vehicle Departure',
+                description: 'White sedan exited the parking lot. License plate partially visible.',
+                activity: 'Vehicle Event',
+                priority: 'low',
+                location: 'Parking Lot A',
+                tags: ['Vehicle', 'Departure']
+            },
+            {
+                id: 3,
+                date: '2026-05-15',
+                time: '12:15:48',
+                title: 'Package Delivery',
+                description: 'Delivery personnel placed package at loading dock. Duration: 2 minutes.',
+                activity: 'Delivery',
+                priority: 'low',
+                location: 'Loading Dock',
+                tags: ['Delivery', 'Normal']
+            },
+            {
+                id: 4,
+                date: '2026-05-15',
+                time: '11:28:35',
+                title: 'Abnormal Activity Detected',
+                description: 'Suspicious behavior detected near restricted area. Individual loitering for extended period.',
+                activity: 'Suspicious Activity',
+                priority: 'high',
+                location: 'Restricted Zone B',
+                tags: ['Suspicious', 'Loitering', 'Review']
+            },
+            {
+                id: 5,
+                date: '2026-05-15',
+                time: '10:45:12',
+                title: 'Employee Access',
+                description: 'Staff member entered through side entrance. Badge scan successful.',
+                activity: 'Access Control',
+                priority: 'low',
+                location: 'Side Door',
+                tags: ['Employee', 'Authorized']
+            },
+            {
+                id: 6,
+                date: '2026-05-15',
+                time: '09:52:43',
+                title: 'Unusual Gathering',
+                description: 'Group of 5 individuals gathered near perimeter fence. Conversation lasted ~8 minutes.',
+                activity: 'Gathering Alert',
+                priority: 'medium',
+                location: 'Perimeter Fence',
+                tags: ['Group', 'Gathering', 'Monitor']
+            },
+            {
+                id: 7,
+                date: '2026-05-14',
+                time: '18:23:19',
+                title: 'System Test',
+                description: 'Scheduled security system test. All cameras operational and functioning normally.',
+                activity: 'System Check',
+                priority: 'low',
+                location: 'System',
+                tags: ['Test', 'System']
+            },
+            {
+                id: 8,
+                date: '2026-05-14',
+                time: '16:37:56',
+                title: 'Door Ajar Alert',
+                description: 'Emergency exit door found open. Duration: 45 seconds. Auto-closed by security system.',
+                activity: 'Door Alert',
+                priority: 'medium',
+                location: 'Emergency Exit',
+                tags: ['Door', 'Alert', 'Security']
+            },
+            {
+                id: 9,
+                date: '2026-05-14',
+                time: '14:19:22',
+                title: 'Multiple Break-in Attempts',
+                description: 'Multiple unauthorized access attempts detected on rear entrance. System blocked all attempts.',
+                activity: 'Security Threat',
+                priority: 'high',
+                location: 'Rear Entrance',
+                tags: ['Critical', 'Threat', 'Urgent']
+            },
+            {
+                id: 10,
+                date: '2026-05-14',
+                time: '12:04:38',
+                title: 'Visitor Check-in',
+                description: 'Visitor successfully checked in at reception. Duration of visit: 2 hours.',
+                activity: 'Visitor',
+                priority: 'low',
+                location: 'Reception',
+                tags: ['Visitor', 'Check-in']
+            },
+            {
+                id: 11,
+                date: '2026-05-14',
+                time: '10:15:07',
+                title: 'Hardware Maintenance',
+                description: 'Technician performed scheduled maintenance on camera system. All systems verified.',
+                activity: 'Maintenance',
+                priority: 'low',
+                location: 'Server Room',
+                tags: ['Maintenance', 'Scheduled']
+            },
+            {
+                id: 12,
+                date: '2026-05-13',
+                time: '22:45:33',
+                title: 'Late Night Surveillance',
+                description: 'Routine night patrol completed. No suspicious activity detected.',
+                activity: 'Patrol',
+                priority: 'low',
+                location: 'All Zones',
+                tags: ['Routine', 'Patrol']
+            }
+        ];
+
+        let filteredLogs = [...videoLogs];
+        let currentFilter = 'all';
+
+        function formatTime(timeString) {
+            return timeString;
+        }
+
+        function createLogElement(log) {
+            const div = document.createElement('div');
+            div.className = `log-entry priority-${log.priority}`;
+            div.innerHTML = `
+                <div class="log-time">
+                    <div class="log-date">${new Date(log.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                    <div class="log-time-value">${formatTime(log.time)}</div>
+                </div>
+                <div class="log-activity">
+                    <div class="log-title">${log.title}</div>
+                    <div class="log-description">${log.description}</div>
+                    <div class="log-tags">
+                        <span class="tag">📍 ${log.location}</span>
+                        <span class="tag">🏷️ ${log.activity}</span>
+                        ${log.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}
+                    </div>
+                </div>
+                <div class="priority-badge">
+                    <span class="priority-dot"></span>
+                    ${log.priority.charAt(0).toUpperCase() + log.priority.slice(1)}
+                </div>
+            `;
+            
+            div.addEventListener('click', () => {
+                console.log('Selected log:', log);
+                // Here you would load the actual video when implemented
+                alert(`Video for: ${log.title}\n\nLocation: ${log.location}\nTime: ${log.date} ${log.time}`);
+            });
+
+            return div;
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('logsContainer');
+            
+            if (filteredLogs.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <h2>No events found</h2>
+                        <p>Try adjusting your search or filters</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = '';
+            filteredLogs.forEach(log => {
+                container.appendChild(createLogElement(log));
+            });
+
+            updateStats();
+        }
+
+        function updateStats() {
+            const total = videoLogs.length;
+            const high = videoLogs.filter(l => l.priority === 'high').length;
+            const medium = videoLogs.filter(l => l.priority === 'medium').length;
+            const low = videoLogs.filter(l => l.priority === 'low').length;
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-high').textContent = high;
+            document.getElementById('stat-medium').textContent = medium;
+            document.getElementById('stat-low').textContent = low;
+        }
+
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            
+            filteredLogs = videoLogs.filter(log => {
+                // Priority filter
+                if (currentFilter !== 'all' && log.priority !== currentFilter) {
+                    return false;
+                }
+
+                // Search filter
+                if (searchTerm) {
+                    const searchableText = `
+                        ${log.title} ${log.description} ${log.activity} 
+                        ${log.location} ${log.tags.join(' ')}
+                    `.toLowerCase();
+                    return searchableText.includes(searchTerm);
+                }
+
+                return true;
+            });
+
+            // Sort by date and time (newest first)
+            filteredLogs.sort((a, b) => {
+                const dateA = new Date(`${a.date} ${a.time}`);
+                const dateB = new Date(`${b.date} ${b.time}`);
+                return dateB - dateA;
+            });
+
+            renderLogs();
+        }
+
+        // Event Listeners
+        document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentFilter = e.target.dataset.filter;
+                applyFilters();
+            });
+        });
+
+        // Initial render
+        renderLogs();
+    </script>
+</body>
+</html>

@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Lock, Unlock, Wifi, Battery, Bell, Key, ChevronRight, ShieldCheck, Video, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import lockHero from "@/assets/lock-hero.jpg";
+import { useAuth } from "@/contexts/auth-context";
+import { signOut } from "@/lib/auth";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -14,7 +16,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
+  const { profile } = useAuth();
   const [locked, setLocked] = useState(true);
+  const displayName = profile?.name?.split(" ")[0] ?? "there";
 
   return (
     <div className="px-5 pt-12">
@@ -23,13 +27,22 @@ function Home() {
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Welcome home</p>
           <h1 className="mt-1 font-display text-3xl leading-none">
-            Hello, <span className="italic text-gold">Alex</span>
+            Hello, <span className="italic text-gold">{displayName}</span>
           </h1>
         </div>
-        <button className="relative grid h-11 w-11 place-items-center rounded-full bg-card border border-border">
-          <Bell className="h-4 w-4" />
-          <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-gold" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="rounded-full border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
+          >
+            Log out
+          </button>
+          <button className="relative grid h-11 w-11 place-items-center rounded-full bg-card border border-border">
+            <Bell className="h-4 w-4" />
+            <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-gold" />
+          </button>
+        </div>
       </header>
 
       {/* Hero lock card */}
