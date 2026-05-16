@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Lock, Unlock, Video, UserCheck, AlertTriangle, KeyRound, Footprints } from "lucide-react";
 
-export const Route = createFileRoute("/activity")({
+export const Route = createFileRoute("/vault/$bubbleId/activity")({
   component: ActivityPage,
   head: () => ({
     meta: [

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Sparkles, Plus, Baby, HeartPulse, UserX, Flame, PackageOpen, Dog } from "lucide-react";
 import { useState } from "react";
 
-export const Route = createFileRoute("/commands")({
+export const Route = createFileRoute("/vault/$bubbleId/commands")({
   component: CommandsPage,
   head: () => ({
     meta: [
