@@ -33,7 +33,12 @@ dist-ssr
 
 .env
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Local detection pipeline output (not app source)
 data/events.db
 storage/clips/
-storage/frames/
+storage/

@@ -32,8 +32,8 @@ class YoloDetector:
         out = []
         for r in results:
             for box in r.boxes:
-                cls = int(box.cls.cpu().numpy()) if hasattr(box, 'cls') else None
-                confv = float(box.conf.cpu().numpy()) if hasattr(box, 'conf') else 0.0
+                cls = int(box.cls.cpu().numpy().flat[0]) if hasattr(box, 'cls') else None
+                confv = float(box.conf.cpu().numpy().flat[0]) if hasattr(box, 'conf') else 0.0
                 xyxy = box.xyxy.cpu().numpy().tolist() if hasattr(box, 'xyxy') else []
                 out.append({"class": cls, "score": confv, "bbox": xyxy})
         return out
