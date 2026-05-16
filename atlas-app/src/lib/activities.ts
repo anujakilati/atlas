@@ -1,9 +1,15 @@
-export type Activity = {
-  id: number;
+export type DeviceEvent = {
+  id: string;
   created_at: string;
-  recording_url: string | null;
-  cam_name: string | null;
-  reason: string | null;
+  event_type: string;
+  event_subtype: string | null;
+  risk_level: string | null;
+  confidence: number | null;
+  incident_confirmed: boolean;
+  metadata: Record<string, unknown>;
+  bubble: string;
+  device: string | null;
+  recording_id: string | null;
 };
 
 export type Character = {
@@ -11,7 +17,6 @@ export type Character = {
   created_at: string;
   profile_crop_url: string | null;
   sus_character_description: string | null;
-  activity_characters: { activities: { cam_name: string | null } | null }[];
 };
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
@@ -25,20 +30,28 @@ function authHeaders() {
   };
 }
 
-export async function fetchActivities(): Promise<Activity[]> {
+export async function fetchDeviceEvents(): Promise<DeviceEvent[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/activities?select=id,created_at,recording_url,cam_name,reason&order=created_at.desc&limit=100`,
+    `${SUPABASE_URL}/rest/v1/device_events?select=*&order=created_at.desc&limit=100`,
     { headers: authHeaders() }
   );
-  if (!res.ok) throw new Error(`activities fetch failed: ${res.status}`);
-  return res.json() as Promise<Activity[]>;
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`[fetchDeviceEvents] ${res.status}:`, text);
+    throw new Error(`device_events fetch failed: ${res.status}`);
+  }
+  return res.json() as Promise<DeviceEvent[]>;
 }
 
 export async function fetchCharacters(): Promise<Character[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/characters?select=*,activity_characters(activities(cam_name))&order=created_at.desc&limit=100`,
+    `${SUPABASE_URL}/rest/v1/characters?select=*&order=created_at.desc&limit=100`,
     { headers: authHeaders() }
   );
-  if (!res.ok) throw new Error(`characters fetch failed: ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`[fetchCharacters] ${res.status}:`, text);
+    throw new Error(`characters fetch failed: ${res.status}`);
+  }
   return res.json() as Promise<Character[]>;
 }

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { type Activity, type Character, fetchActivities, fetchCharacters } from "../lib/activities";
+import { type DeviceEvent, type Character, fetchDeviceEvents, fetchCharacters } from "../lib/activities";
 
 export const Route = createFileRoute("/vault/$bubbleId/activity")({
   component: ActivityPage,
@@ -29,14 +29,20 @@ function formatDay(iso: string): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function groupByDay(items: Activity[]): { day: string; items: Activity[] }[] {
-  const map = new Map<string, Activity[]>();
+function groupByDay(items: DeviceEvent[]): { day: string; items: DeviceEvent[] }[] {
+  const map = new Map<string, DeviceEvent[]>();
   for (const item of items) {
     const day = formatDay(item.created_at);
     if (!map.has(day)) map.set(day, []);
     map.get(day)!.push(item);
   }
   return Array.from(map.entries()).map(([day, items]) => ({ day, items }));
+}
+
+function riskColor(level: string | null) {
+  if (level === "high" || level === "critical") return "bg-danger/15 text-danger";
+  if (level === "medium") return "bg-orange-500/15 text-orange-500";
+  return "bg-muted/30 text-muted-foreground";
 }
 
 function SkeletonCard() {
@@ -54,22 +60,22 @@ function SkeletonCard() {
 
 function ActivityPage() {
   const [tab, setTab] = useState<"moments" | "characters">("moments");
-  const [activities, setActivities] = useState<Activity[]>([]);
+  const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [loadingMoments, setLoadingMoments] = useState(true);
   const [loadingCharacters, setLoadingCharacters] = useState(true);
 
   const loadMoments = useCallback(() => {
-    void fetchActivities()
-      .then(setActivities)
-      .catch(() => setActivities([]))
+    void fetchDeviceEvents()
+      .then(setEvents)
+      .catch((e) => { console.error("[moments]", e); setEvents([]); })
       .finally(() => setLoadingMoments(false));
   }, []);
 
   const loadCharacters = useCallback(() => {
     void fetchCharacters()
       .then(setCharacters)
-      .catch(() => setCharacters([]))
+      .catch((e) => { console.error("[characters]", e); setCharacters([]); })
       .finally(() => setLoadingCharacters(false));
   }, []);
 
@@ -83,7 +89,7 @@ function ActivityPage() {
     return () => clearInterval(id);
   }, [loadMoments, loadCharacters]);
 
-  const groups = groupByDay(activities);
+  const groups = groupByDay(events);
 
   return (
     <div className="px-5 pt-12 pb-8">
@@ -125,32 +131,38 @@ function ActivityPage() {
               <SkeletonCard />
               <SkeletonCard />
             </div>
-          ) : activities.length === 0 ? (
+          ) : events.length === 0 ? (
             <p className="mt-16 text-center text-sm text-muted-foreground">No suspicious activity detected yet.</p>
           ) : (
             groups.map((g) => (
               <section key={g.day}>
                 <h2 className="mb-3 text-xs uppercase tracking-[0.2em] text-muted-foreground">{g.day}</h2>
                 <ol className="relative space-y-3 border-l border-border pl-5">
-                  {g.items.map((a) => (
-                    <li key={a.id} className="relative">
-                      <span className="absolute -left-[27px] top-3 h-2 w-2 rounded-full bg-gold" />
-                      <div className="rounded-2xl border border-border bg-card p-3">
-                        <div className="flex items-center gap-3">
-                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-danger/15 text-danger">
-                            <AlertTriangle className="h-4 w-4" />
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{a.cam_name ?? "Unknown Camera"}</p>
-                            {a.reason && (
-                              <p className="text-xs text-muted-foreground truncate">{a.reason}</p>
-                            )}
+                  {g.items.map((ev) => {
+                    const deviceName = ev.event_type ?? "Suspicious Event";
+                    const subtitle = [ev.event_subtype, ev.risk_level ? `${ev.risk_level} risk` : null]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <li key={ev.id} className="relative">
+                        <span className="absolute -left-[27px] top-3 h-2 w-2 rounded-full bg-gold" />
+                        <div className="rounded-2xl border border-border bg-card p-3">
+                          <div className="flex items-center gap-3">
+                            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${riskColor(ev.risk_level)}`}>
+                              <AlertTriangle className="h-4 w-4" />
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{deviceName}</p>
+                              {subtitle && (
+                                <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-xs text-muted-foreground">{formatTime(ev.created_at)}</span>
                           </div>
-                          <span className="shrink-0 text-xs text-muted-foreground">{formatTime(a.created_at)}</span>
                         </div>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ol>
               </section>
             ))
@@ -169,45 +181,32 @@ function ActivityPage() {
           ) : characters.length === 0 ? (
             <p className="mt-16 text-center text-sm text-muted-foreground">No suspicious characters identified yet.</p>
           ) : (
-            characters.map((c) => {
-              const camNames = c.activity_characters
-                .map((ac) => ac.activities?.cam_name)
-                .filter((n): n is string => Boolean(n));
-              return (
-                <div key={c.id} className="rounded-2xl border border-border bg-card overflow-hidden">
-                  {c.profile_crop_url && (
-                    <img
-                      src={c.profile_crop_url}
-                      alt="Suspect"
-                      className="w-full object-contain max-h-64 bg-black/20"
-                    />
-                  )}
-                  <div className="p-4">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="grid h-6 w-6 place-items-center rounded-lg bg-danger/15 text-danger">
-                        <User className="h-3.5 w-3.5" />
-                      </span>
-                      {camNames.map((name) => (
-                        <span
-                          key={name}
-                          className="rounded-full border border-border bg-accent px-2 py-0.5 text-xs text-muted-foreground"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                      <span className="text-xs text-muted-foreground">
-                        {formatTime(c.created_at)} · {formatDay(c.created_at)}
-                      </span>
-                    </div>
-                    {c.sus_character_description && (
-                      <p className="mt-2 text-sm text-foreground leading-relaxed">
-                        {c.sus_character_description}
-                      </p>
-                    )}
+            characters.map((c) => (
+              <div key={c.id} className="rounded-2xl border border-border bg-card overflow-hidden">
+                {c.profile_crop_url && (
+                  <img
+                    src={c.profile_crop_url}
+                    alt="Suspect"
+                    className="w-full object-contain max-h-64 bg-black/20"
+                  />
+                )}
+                <div className="p-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="grid h-6 w-6 place-items-center rounded-lg bg-danger/15 text-danger">
+                      <User className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatTime(c.created_at)} · {formatDay(c.created_at)}
+                    </span>
                   </div>
+                  {c.sus_character_description && (
+                    <p className="mt-2 text-sm text-foreground leading-relaxed">
+                      {c.sus_character_description}
+                    </p>
+                  )}
                 </div>
-              );
-            })
+              </div>
+            ))
           )}
         </div>
       )}

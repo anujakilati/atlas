@@ -414,8 +414,83 @@ def _supabase_headers(key):
     }
 
 
-def push_to_supabase(profile, event_meta, replay_path, crop_url=None):
-    """Insert an activity + character record and link them via activity_characters."""
+def _jaccard_similarity(a, b):
+    if not a or not b:
+        return 0.0
+    sa = set(a.lower().split())
+    sb = set(b.lower().split())
+    intersection = len(sa & sb)
+    union = len(sa | sb)
+    return intersection / union if union > 0 else 0.0
+
+
+def _histogram_similarity(img_a, img_b):
+    """Compare two BGR images via per-channel histogram correlation (0–1)."""
+    scores = []
+    for ch in range(3):
+        ha = cv2.calcHist([img_a], [ch], None, [64], [0, 256])
+        hb = cv2.calcHist([img_b], [ch], None, [64], [0, 256])
+        cv2.normalize(ha, ha)
+        cv2.normalize(hb, hb)
+        scores.append(max(0.0, cv2.compareHist(ha, hb, cv2.HISTCMP_CORREL)))
+    return sum(scores) / len(scores)
+
+
+def _download_image(url):
+    """Download an image from a URL and return a BGR numpy array, or None."""
+    import requests as req
+    try:
+        resp = req.get(url, timeout=10)
+        resp.raise_for_status()
+        arr = np.frombuffer(resp.content, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
+def is_duplicate_character(new_profile, new_crop, sb_url, key, threshold=0.80):
+    """Return True if a sufficiently similar character already exists in the DB."""
+    import requests as req
+    new_summary = (new_profile.get("summary", "") if new_profile else "").lower()
+
+    try:
+        resp = req.get(
+            f"{sb_url}/rest/v1/characters?select=id,sus_character_description,profile_crop_url&limit=50",
+            headers=_supabase_headers(key),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        existing = resp.json()
+    except Exception as e:
+        logger.warning("Could not fetch existing characters for dedup check: %s", e)
+        return False
+
+    for char in existing:
+        existing_summary = (char.get("sus_character_description") or "").lower()
+        text_sim = _jaccard_similarity(new_summary, existing_summary)
+
+        img_sim = 0.0
+        existing_url = char.get("profile_crop_url")
+        if existing_url and new_crop is not None:
+            remote = _download_image(existing_url)
+            if remote is not None:
+                img_sim = _histogram_similarity(new_crop, remote)
+
+        # Weight: 50% text, 50% image (fall back to text-only if no image)
+        if existing_url and new_crop is not None:
+            similarity = 0.5 * text_sim + 0.5 * img_sim
+        else:
+            similarity = text_sim
+
+        if similarity >= threshold:
+            print(f"[Dedup] Matches existing character {char['id']} (similarity {similarity:.0%}) — skipping insert.")
+            return True
+
+    return False
+
+
+def push_to_supabase(profile, event_meta, replay_path, crop_url=None, score=0.0, cropped_frame=None):
+    """Insert a device_event + character record into Supabase."""
     import requests as req
     sb_url = os.environ.get("VITE_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_KEY")
@@ -426,21 +501,47 @@ def push_to_supabase(profile, event_meta, replay_path, crop_url=None):
     headers = _supabase_headers(key)
     return_headers = {**headers, "Prefer": "return=representation"}
 
-    # 1. Insert the moment into activities
-    activity_row = {
-        "recording_url": replay_path,
-        "cam_name": event_meta.get("cam_name") or event_meta.get("source", "unknown"),
-        "reason": "suspicious_person",
-    }
-    try:
-        resp = req.post(f"{sb_url}/rest/v1/activities", headers=return_headers, json=activity_row, timeout=10)
-        resp.raise_for_status()
-        activity_id = resp.json()[0]["id"]
-    except Exception as e:
-        logger.warning("Failed to insert activity: %s", e)
+    # 1. Resolve bubble ID — use env override or fetch first bubble from Supabase
+    bubble_id = os.environ.get("BUBBLE_ID")
+    if not bubble_id:
+        try:
+            r = req.get(f"{sb_url}/rest/v1/bubbles?select=id&limit=1", headers=headers, timeout=10)
+            r.raise_for_status()
+            rows = r.json()
+            bubble_id = rows[0]["id"] if rows else None
+            if not bubble_id:
+                print(f"[Supabase] bubble table returned no rows — check RLS or table name")
+        except Exception as e:
+            print(f"[Supabase] Could not fetch bubble ID: {e}")
+
+    if not bubble_id:
+        print("[Supabase] Skipping device_events insert — no bubble ID available")
+    else:
+        event_row = {
+            "bubble": bubble_id,
+            "event_type": "suspicious_person",
+            "event_subtype": event_meta.get("label", "character_profile_generated"),
+            "risk_level": "high" if score >= 0.8 else "medium" if score >= 0.5 else "low",
+            "confidence": round(float(score), 4),
+            "incident_confirmed": True,
+            "metadata": {
+                "source": event_meta.get("source"),
+                "replay_path": replay_path,
+                "profile_crop_url": crop_url,
+                "character_profile": profile or {},
+            },
+        }
+        try:
+            resp = req.post(f"{sb_url}/rest/v1/device_events", headers=return_headers, json=event_row, timeout=10)
+            resp.raise_for_status()
+            print("[Supabase] device_events row inserted.")
+        except Exception as e:
+            print(f"[Supabase] Failed to insert device_event: {e} — response: {getattr(e, 'response', None) and e.response.text}")
+
+    # 2. Deduplicate then insert character
+    if is_duplicate_character(profile, cropped_frame, sb_url, key):
         return
 
-    # 2. Insert the suspect into characters
     summary = profile.get("summary", "") if profile else ""
     character_row = {
         "sus_character_description": summary,
@@ -450,22 +551,9 @@ def push_to_supabase(profile, event_meta, replay_path, crop_url=None):
         resp = req.post(f"{sb_url}/rest/v1/characters", headers=return_headers, json=character_row, timeout=10)
         resp.raise_for_status()
         character_id = resp.json()[0]["id"]
+        print(f"[Supabase] Character {character_id} inserted.")
     except Exception as e:
-        logger.warning("Failed to insert character: %s", e)
-        return
-
-    # 3. Link them in the junction table
-    try:
-        resp = req.post(
-            f"{sb_url}/rest/v1/activity_characters",
-            headers={**headers, "Prefer": "return=minimal"},
-            json={"activity_id": activity_id, "character_id": character_id},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        print(f"[Supabase] Activity {activity_id} linked to character {character_id}.")
-    except Exception as e:
-        logger.warning("Failed to link activity and character: %s", e)
+        print(f"[Supabase] Failed to insert character: {e}")
 
 
 def main():
@@ -651,7 +739,7 @@ def main():
             print(f"[Character Profile] Crop saved to: {profile_img_path}")
 
             crop_url = upload_crop_to_storage(cropped, ts)
-            push_to_supabase(profile, meta_obj, replay_path, crop_url=crop_url)
+            push_to_supabase(profile, meta_obj, replay_path, crop_url=crop_url, score=score, cropped_frame=cropped)
         else:
             print("\n[Character Profile] No clear suspect frame found during replay.")
 
