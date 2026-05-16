@@ -146,10 +146,29 @@ def find_person_bboxes(frame):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Generate a replay for the latest matching event')
+    parser.add_argument('--source', help='Only use events whose metadata source matches this video path')
+    args = parser.parse_args()
+
     dpath = CONFIG['storage']['db_path']
-    events = db.list_events(dpath, limit=1)
+    events = db.list_events(dpath, limit=500)
+    if args.source:
+        filtered = []
+        for event in events:
+            try:
+                meta_obj = ast.literal_eval(event[7]) if isinstance(event[7], str) else (event[7] or {})
+            except Exception:
+                meta_obj = {}
+            if meta_obj.get('source') == args.source:
+                filtered.append(event)
+        events = filtered
     if not events:
-        print('No events in DB. Run the pipeline on a video first.')
+        if args.source:
+            print(f'No events in DB for source: {args.source}')
+        else:
+            print('No events in DB. Run the pipeline on a video first.')
         return
     e = events[0]
     eid, ts, label, score, bbox_s, frame_path, clip_path, meta = e

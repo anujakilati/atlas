@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Video Analyzer</title>
+  <style>body{font-family:system-ui,Arial;margin:20px}button{margin-left:8px}</style>
+</head>
+<body>
+  <h2>Select a video to analyze</h2>
+  <div id="list">Loading...</div>
+  <div id="status" style="margin-top:12px;color:green"></div>
+  <script>
+    async function listVideos(){
+      const res=await fetch('/api/videos');
+      const j=await res.json();
+      const list=document.getElementById('list');
+      list.innerHTML='';
+      if(!j.videos||j.videos.length===0){ list.innerText='No videos found in /videos'; return }
+      j.videos.forEach(fn=>{
+        const row=document.createElement('div');
+        const label=document.createElement('span'); label.innerText=fn;
+        const analyze=document.createElement('button'); analyze.innerText='Analyze';
+        analyze.onclick=async()=>{
+          setStatus('Starting analysis for '+fn);
+          const r=await fetch('/api/analyze', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({source:'videos/'+fn})});
+          const jr=await r.json();
+          setStatus('Pipeline started — waiting for events...');
+          // poll for replay
+          pollReplay();
+        };
+        const replay=document.createElement('button'); replay.innerText='Replay latest';
+        replay.onclick=async()=>{ setStatus('Generating replay...'); const rr=await fetch('/api/replay',{method:'POST'}); if(!rr.ok){ setStatus('No replay yet'); return } const jr=await rr.json(); setStatus('Replay: '+jr.replay); window.open(jr.replay,'_blank'); };
+        row.appendChild(label); row.appendChild(analyze); row.appendChild(replay);
+        list.appendChild(row);
+      })
+    }
+    function setStatus(t){ document.getElementById('status').innerText=t }
+    async function pollReplay(){
+      for(let i=0;i<30;i++){
+        try{
+          const r=await fetch('/api/replay',{method:'POST'});
+          if(r.ok){ const j=await r.json(); setStatus('Replay ready: '+j.replay); window.open(j.replay,'_blank'); return }
+        }catch(e){}
+        setStatus('Waiting for replay... ('+(i+1)+'/30)');
+        await new Promise(r=>setTimeout(r,3000));
+      }
+      setStatus('Timed out waiting for replay.');
+    }
+    listVideos();
+  </script>
+</body>
+</html>

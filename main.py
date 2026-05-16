@@ -8,6 +8,11 @@ Layer 3  Nemotron async  — reasons over full session context, never blocks vid
 
 import time
 import uuid
+import os
+import sys
+import argparse
+import asyncio
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -24,11 +29,16 @@ from pipeline.clip_generation.clip_builder import ClipBuilder
 from pipeline.nemotron_reasoning.engine import NemotronEngine, IncidentPayload
 from pipeline.notifications.alerts import generate as make_notifications
 from pipeline.display.monitor import SurveillanceMonitor, DISPLAY_W, VIDEO_W, VIDEO_H
+from backend.pipelines.pipeline import CCTVPipeline
+from backend.reports.generator import generate_report, report_markdown
+from backend.config import CONFIG
+from backend.storage import db
 
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-VIDEO_PATH = "videos/sus-walking.MOV"
+# Default: honor `VIDEO_PATH` from environment if present, otherwise use bundle default
+VIDEO_PATH = os.getenv("VIDEO_PATH", "videos/nishan-kidnap.MOV")
 OUTPUT_DIR = Path("detection_results/pipeline")
 
 # Protected zone in original 1920×1080 coords — covers the table area.
@@ -50,6 +60,65 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # ── Shared session state (modified by Nemotron callback) ──────────────────────
 _session: InteractionSession | None = None
 _last_report = None
+
+
+def run_batch(video_path: str):
+    """Run the batch analyzer, print a report, and generate the latest replay."""
+    print(f"\n📦 Batch analysis: {video_path}")
+    
+    # Clear the database to ensure fresh analysis
+    db_path = CONFIG['storage']['db_path']
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        print(f"✓ Cleared old database: {db_path}")
+    
+    # Clear old frames to force fresh capture
+    frames_dir = CONFIG['storage']['frames_dir']
+    if os.path.exists(frames_dir):
+        import shutil
+        shutil.rmtree(frames_dir)
+        print(f"✓ Cleared old frames: {frames_dir}")
+    
+    # Clear old replay files to force fresh generation
+    replay_dir = CONFIG['storage'].get('clips_dir', './storage/clips')
+    if replay_dir:
+        replay_dir = os.path.join(replay_dir, 'replay')
+        if os.path.exists(replay_dir):
+            import shutil
+            shutil.rmtree(replay_dir)
+            print(f"✓ Cleared old replays: {replay_dir}")
+    
+    # Initialize fresh database
+    db.init_db(db_path)
+    print(f"✓ Initialized fresh database")
+    
+    # Run pipeline on the selected video
+    print(f"→ Analyzing {video_path}...")
+    asyncio.run(CCTVPipeline(video_path).run())
+
+    # Generate and show report
+    report = generate_report(limit=50)
+    events = report.get('timeline', [])
+    print(f"\n✓ Analysis complete. Found {len(events)} event(s)")
+    if events:
+        print("\n" + report_markdown(report))
+        
+        # Generate replay for the latest event matching this video
+        print(f"\n→ Generating replay for {video_path}...")
+        replay_script = Path("scripts/show_latest_event.py")
+        if replay_script.exists():
+            result = subprocess.run([
+                sys.executable,
+                str(replay_script),
+                "--source",
+                video_path,
+            ], check=False)
+            if result.returncode == 0:
+                print(f"✓ Replay generated successfully")
+        else:
+            print(f"Replay script not found: {replay_script}")
+    else:
+        print("❌ No suspicious activity detected in this video.")
 
 
 def on_nemotron_result(report):
@@ -318,4 +387,25 @@ def run():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run Atlas AI surveillance on a video file")
+    parser.add_argument("-v", "--video", help="Path to input video file to analyze")
+    parser.add_argument("--batch", action="store_true",
+                        help="Run the batch analyzer, print a report, and generate replay")
+    parser.add_argument("--dry-run", action="store_true", help="Print chosen video and exit without running")
+    args = parser.parse_args()
+
+    # Resolve video selection: CLI arg > ENV var > module default
+    if args.video:
+        VIDEO_PATH = args.video
+    else:
+        VIDEO_PATH = os.getenv("VIDEO_PATH", VIDEO_PATH)
+
+    print(f"Using video: {VIDEO_PATH}")
+    if args.dry_run:
+        sys.exit(0)
+
+    if args.batch:
+        run_batch(VIDEO_PATH)
+        sys.exit(0)
+
     run()
