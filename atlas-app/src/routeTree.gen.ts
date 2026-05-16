@@ -12,7 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DeviceIndexRouteImport } from './routes/device/index'
 import { Route as VaultBubbleIdRouteImport } from './routes/vault.$bubbleId'
+import { Route as PairTokenRouteImport } from './routes/pair.$token'
+import { Route as DeviceLiveRouteImport } from './routes/device/live'
+import { Route as CameraDeviceIdRouteImport } from './routes/camera.$deviceId'
+import { Route as VaultBubbleIdIndexRouteImport } from './routes/vault.$bubbleId.index'
 import { Route as VaultBubbleIdCommandsRouteImport } from './routes/vault.$bubbleId.commands'
 import { Route as VaultBubbleIdCameraRouteImport } from './routes/vault.$bubbleId.camera'
 import { Route as VaultBubbleIdActivityRouteImport } from './routes/vault.$bubbleId.activity'
@@ -32,10 +37,35 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeviceIndexRoute = DeviceIndexRouteImport.update({
+  id: '/device/',
+  path: '/device/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VaultBubbleIdRoute = VaultBubbleIdRouteImport.update({
   id: '/vault/$bubbleId',
   path: '/vault/$bubbleId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PairTokenRoute = PairTokenRouteImport.update({
+  id: '/pair/$token',
+  path: '/pair/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeviceLiveRoute = DeviceLiveRouteImport.update({
+  id: '/device/live',
+  path: '/device/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CameraDeviceIdRoute = CameraDeviceIdRouteImport.update({
+  id: '/camera/$deviceId',
+  path: '/camera/$deviceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VaultBubbleIdIndexRoute = VaultBubbleIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultBubbleIdRoute,
 } as any)
 const VaultBubbleIdCommandsRoute = VaultBubbleIdCommandsRouteImport.update({
   id: '/commands',
@@ -57,29 +87,43 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/camera/$deviceId': typeof CameraDeviceIdRoute
+  '/device/live': typeof DeviceLiveRoute
+  '/pair/$token': typeof PairTokenRoute
   '/vault/$bubbleId': typeof VaultBubbleIdRouteWithChildren
+  '/device/': typeof DeviceIndexRoute
   '/vault/$bubbleId/activity': typeof VaultBubbleIdActivityRoute
   '/vault/$bubbleId/camera': typeof VaultBubbleIdCameraRoute
   '/vault/$bubbleId/commands': typeof VaultBubbleIdCommandsRoute
+  '/vault/$bubbleId/': typeof VaultBubbleIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
-  '/vault/$bubbleId': typeof VaultBubbleIdRouteWithChildren
+  '/camera/$deviceId': typeof CameraDeviceIdRoute
+  '/device/live': typeof DeviceLiveRoute
+  '/pair/$token': typeof PairTokenRoute
+  '/device': typeof DeviceIndexRoute
   '/vault/$bubbleId/activity': typeof VaultBubbleIdActivityRoute
   '/vault/$bubbleId/camera': typeof VaultBubbleIdCameraRoute
   '/vault/$bubbleId/commands': typeof VaultBubbleIdCommandsRoute
+  '/vault/$bubbleId': typeof VaultBubbleIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/camera/$deviceId': typeof CameraDeviceIdRoute
+  '/device/live': typeof DeviceLiveRoute
+  '/pair/$token': typeof PairTokenRoute
   '/vault/$bubbleId': typeof VaultBubbleIdRouteWithChildren
+  '/device/': typeof DeviceIndexRoute
   '/vault/$bubbleId/activity': typeof VaultBubbleIdActivityRoute
   '/vault/$bubbleId/camera': typeof VaultBubbleIdCameraRoute
   '/vault/$bubbleId/commands': typeof VaultBubbleIdCommandsRoute
+  '/vault/$bubbleId/': typeof VaultBubbleIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -87,35 +131,53 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/camera/$deviceId'
+    | '/device/live'
+    | '/pair/$token'
     | '/vault/$bubbleId'
+    | '/device/'
     | '/vault/$bubbleId/activity'
     | '/vault/$bubbleId/camera'
     | '/vault/$bubbleId/commands'
+    | '/vault/$bubbleId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/signup'
-    | '/vault/$bubbleId'
+    | '/camera/$deviceId'
+    | '/device/live'
+    | '/pair/$token'
+    | '/device'
     | '/vault/$bubbleId/activity'
     | '/vault/$bubbleId/camera'
     | '/vault/$bubbleId/commands'
+    | '/vault/$bubbleId'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/signup'
+    | '/camera/$deviceId'
+    | '/device/live'
+    | '/pair/$token'
     | '/vault/$bubbleId'
+    | '/device/'
     | '/vault/$bubbleId/activity'
     | '/vault/$bubbleId/camera'
     | '/vault/$bubbleId/commands'
+    | '/vault/$bubbleId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
+  CameraDeviceIdRoute: typeof CameraDeviceIdRoute
+  DeviceLiveRoute: typeof DeviceLiveRoute
+  PairTokenRoute: typeof PairTokenRoute
   VaultBubbleIdRoute: typeof VaultBubbleIdRouteWithChildren
+  DeviceIndexRoute: typeof DeviceIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -141,12 +203,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/device/': {
+      id: '/device/'
+      path: '/device'
+      fullPath: '/device/'
+      preLoaderRoute: typeof DeviceIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/vault/$bubbleId': {
       id: '/vault/$bubbleId'
       path: '/vault/$bubbleId'
       fullPath: '/vault/$bubbleId'
       preLoaderRoute: typeof VaultBubbleIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/pair/$token': {
+      id: '/pair/$token'
+      path: '/pair/$token'
+      fullPath: '/pair/$token'
+      preLoaderRoute: typeof PairTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/device/live': {
+      id: '/device/live'
+      path: '/device/live'
+      fullPath: '/device/live'
+      preLoaderRoute: typeof DeviceLiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/camera/$deviceId': {
+      id: '/camera/$deviceId'
+      path: '/camera/$deviceId'
+      fullPath: '/camera/$deviceId'
+      preLoaderRoute: typeof CameraDeviceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vault/$bubbleId/': {
+      id: '/vault/$bubbleId/'
+      path: '/'
+      fullPath: '/vault/$bubbleId/'
+      preLoaderRoute: typeof VaultBubbleIdIndexRouteImport
+      parentRoute: typeof VaultBubbleIdRoute
     }
     '/vault/$bubbleId/commands': {
       id: '/vault/$bubbleId/commands'
@@ -176,12 +273,14 @@ interface VaultBubbleIdRouteChildren {
   VaultBubbleIdActivityRoute: typeof VaultBubbleIdActivityRoute
   VaultBubbleIdCameraRoute: typeof VaultBubbleIdCameraRoute
   VaultBubbleIdCommandsRoute: typeof VaultBubbleIdCommandsRoute
+  VaultBubbleIdIndexRoute: typeof VaultBubbleIdIndexRoute
 }
 
 const VaultBubbleIdRouteChildren: VaultBubbleIdRouteChildren = {
   VaultBubbleIdActivityRoute: VaultBubbleIdActivityRoute,
   VaultBubbleIdCameraRoute: VaultBubbleIdCameraRoute,
   VaultBubbleIdCommandsRoute: VaultBubbleIdCommandsRoute,
+  VaultBubbleIdIndexRoute: VaultBubbleIdIndexRoute,
 }
 
 const VaultBubbleIdRouteWithChildren = VaultBubbleIdRoute._addFileChildren(
@@ -192,7 +291,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
+  CameraDeviceIdRoute: CameraDeviceIdRoute,
+  DeviceLiveRoute: DeviceLiveRoute,
+  PairTokenRoute: PairTokenRoute,
   VaultBubbleIdRoute: VaultBubbleIdRouteWithChildren,
+  DeviceIndexRoute: DeviceIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

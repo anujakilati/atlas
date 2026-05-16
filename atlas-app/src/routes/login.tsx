@@ -57,12 +57,20 @@ function LoginPage() {
       error={error}
       onSubmit={handleSubmit}
       footer={
-        <>
-          New here?{" "}
-          <Link to="/signup" className="font-medium text-gold">
-            Create an account
-          </Link>
-        </>
+        <div className="space-y-3">
+          <p>
+            New here?{" "}
+            <Link to="/signup" className="font-medium text-gold">
+              Create an account
+            </Link>
+          </p>
+          <p>
+            Setting up a camera?{" "}
+            <Link to="/device" className="font-medium text-gold">
+              Register device with token
+            </Link>
+          </p>
+        </div>
       }
     />
   );

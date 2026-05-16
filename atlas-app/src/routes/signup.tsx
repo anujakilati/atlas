@@ -59,12 +59,20 @@ function SignUpPage() {
       success={success}
       onSubmit={handleSubmit}
       footer={
-        <>
-          Already have an account?{" "}
-          <Link to="/login" className="font-medium text-gold">
-            Log in
-          </Link>
-        </>
+        <div className="space-y-3">
+          <p>
+            Already have an account?{" "}
+            <Link to="/login" className="font-medium text-gold">
+              Log in
+            </Link>
+          </p>
+          <p>
+            Camera device?{" "}
+            <Link to="/device" className="font-medium text-gold">
+              Register with token
+            </Link>
+          </p>
+        </div>
       }
     />
   );
