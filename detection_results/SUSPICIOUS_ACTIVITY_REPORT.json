@@ -1,0 +1,25 @@
+{
+  "video": "/Users/ananyaj/atlas/atlas-app/video1.MOV",
+  "cost": "$0.00 - 100% FREE",
+  "total_frames": 276,
+  "fps": 59.97826874320898,
+  "duration_seconds": 4.601666666666667,
+  "suspicious_activities": 1,
+  "activities": [
+    {
+      "activity_type": "ITEM_PICKED_UP",
+      "detected_as": "person",
+      "confidence": 0.5151342153549194,
+      "first_seen_frame": 110,
+      "last_seen_frame": 174,
+      "duration_seconds": 1.0670531400966183,
+      "frames_tracked": 48,
+      "box_coordinates": [
+        1353,
+        6,
+        1918,
+        152
+      ]
+    }
+  ]
+}

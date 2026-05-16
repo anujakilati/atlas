@@ -1,0 +1,73 @@
+VIDEO OBJECT TRACKING ANALYSIS
+============================================================
+
+Video: /Users/ananyaj/atlas/atlas-app/video1.MOV
+Duration: 0:00:04
+Total frames: 276
+Frames analyzed: 28
+
+Total objects detected: 41
+Objects picked up: 12
+
+PICKED UP ITEMS:
+------------------------------------------------------------
+
+SMARTPHONE
+  First seen: Frame 0 (0:00:00)
+  Last seen:  Frame 260 (0:00:04)
+  Appeared in 17 frames
+
+ENERGY DRINK CAN
+  First seen: Frame 0 (0:00:00)
+  Last seen:  Frame 190 (0:00:03)
+  Appeared in 6 frames
+
+TRAVEL TUMBLER
+  First seen: Frame 0 (0:00:00)
+  Last seen:  Frame 90 (0:00:01)
+  Appeared in 3 frames
+
+CHAIR
+  First seen: Frame 0 (0:00:00)
+  Last seen:  Frame 230 (0:00:03)
+  Appeared in 13 frames
+
+BEVERAGE CAN
+  First seen: Frame 10 (0:00:00)
+  Last seen:  Frame 240 (0:00:04)
+  Appeared in 7 frames
+
+CHIP BAGS
+  First seen: Frame 10 (0:00:00)
+  Last seen:  Frame 100 (0:00:01)
+  Appeared in 2 frames
+
+TUMBLER
+  First seen: Frame 10 (0:00:00)
+  Last seen:  Frame 110 (0:00:01)
+  Appeared in 4 frames
+
+TABLE
+  First seen: Frame 10 (0:00:00)
+  Last seen:  Frame 230 (0:00:03)
+  Appeared in 6 frames
+
+INSULATED TUMBLER
+  First seen: Frame 20 (0:00:00)
+  Last seen:  Frame 100 (0:00:01)
+  Appeared in 2 frames
+
+CELSIUS CAN
+  First seen: Frame 100 (0:00:01)
+  Last seen:  Frame 150 (0:00:02)
+  Appeared in 2 frames
+
+KEYS AND KEYCHAIN
+  First seen: Frame 100 (0:00:01)
+  Last seen:  Frame 240 (0:00:04)
+  Appeared in 2 frames
+
+ROUND DARK TABLE
+  First seen: Frame 180 (0:00:03)
+  Last seen:  Frame 260 (0:00:04)
+  Appeared in 2 frames
