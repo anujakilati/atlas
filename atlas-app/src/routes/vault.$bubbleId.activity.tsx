@@ -62,6 +62,22 @@ function ActivityPage() {
         <h1 className="mt-1 font-display text-3xl">Activity</h1>
       </header>
 
+      {/* AI Alerts */}
+      <section className="mt-5">
+        <h2 className="text-sm font-medium">AI Alerts</h2>
+        <div className="mt-3 rounded-2xl border border-border bg-card p-3">
+          <p className="font-semibold">Stolen phone</p>
+          <p className="text-xs text-muted-foreground">AI alert: suspicious device activity detected.</p>
+          <div className="mt-3">
+            <video
+              controls
+              className="w-full rounded-md"
+              src="https://interactive-examples.mdn.mozilla.net/media/examples/flower.mp4"
+            />
+          </div>
+        </div>
+      </section>
+
       {/* filter chips */}
       <div className="mt-5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {["All", "Locks", "Cameras", "AI alerts", "Keys"].map((f, i) => (
