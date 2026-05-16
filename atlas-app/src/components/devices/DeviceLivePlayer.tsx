@@ -1,4 +1,4 @@
-import { Mic, MicOff, Volume2, Maximize2, Circle, Video } from "lucide-react";
+import { Mic, MicOff, Volume2, Maximize2, Circle, Video, RefreshCw } from "lucide-react";
 import { useDeviceStream } from "@/hooks/use-device-stream";
 import { useStorageLiveFeed } from "@/hooks/use-storage-live-feed";
 
@@ -10,7 +10,7 @@ type DeviceLivePlayerProps = {
   onMutedChange: (muted: boolean) => void;
 };
 
-/** Key this component by deviceId so switching cameras fully resets WebRTC. */
+/** Key by deviceId so switching cameras fully resets WebRTC. */
 export function DeviceLivePlayer({
   deviceId,
   deviceName,
@@ -18,12 +18,11 @@ export function DeviceLivePlayer({
   muted,
   onMutedChange,
 }: DeviceLivePlayerProps) {
-  const { videoRef, hasMedia, waiting, error } = useDeviceStream(deviceId, "viewer");
-  const useStorageFallback = !hasMedia && deviceOnline;
-  const storageLiveSrc = useStorageLiveFeed(deviceId, useStorageFallback);
+  const { videoRef, hasMedia, waiting, error, reconnect } = useDeviceStream(deviceId, "viewer");
+  const storageLiveSrc = useStorageLiveFeed(deviceId, deviceOnline && !hasMedia);
 
   const showWebRtc = hasMedia;
-  const showStorage = useStorageFallback && Boolean(storageLiveSrc);
+  const showStorage = !showWebRtc && deviceOnline && Boolean(storageLiveSrc);
   const showVideo = showWebRtc || showStorage;
   const showWaitingOverlay = waiting && !showVideo;
 
@@ -53,10 +52,8 @@ export function DeviceLivePlayer({
         <div className="absolute inset-0 z-20 bg-gradient-to-br from-zinc-900 via-zinc-800 to-black">
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
             <Video className="h-8 w-8 animate-pulse text-gold" />
-            <p className="text-sm text-white/80">Waiting for {deviceName}</p>
-            <p className="text-xs text-white/50">
-              Open the device app with this camera&apos;s token and keep that page open
-            </p>
+            <p className="text-sm text-white/80">Connecting to {deviceName}…</p>
+            <p className="text-xs text-white/50">Reconnects automatically — or tap ↻</p>
           </div>
         </div>
       ) : null}
@@ -76,12 +73,22 @@ export function DeviceLivePlayer({
           </span>
         ) : (
           <span className="rounded-full bg-black/40 px-2.5 py-1 backdrop-blur text-muted-foreground">
-            {deviceOnline ? "Waiting for camera" : "Offline"}
+            {deviceOnline ? "Connecting…" : "Offline"}
           </span>
         )}
-        <span className="rounded-full bg-black/40 px-2.5 py-1 backdrop-blur">
-          {showWebRtc ? "Direct" : showStorage ? "Cloud" : "—"}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={reconnect}
+            className="grid h-8 w-8 place-items-center rounded-full bg-black/40 backdrop-blur"
+            aria-label="Reconnect stream"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+          <span className="rounded-full bg-black/40 px-2.5 py-1 backdrop-blur">
+            {showWebRtc ? "Direct" : showStorage ? "Cloud" : "—"}
+          </span>
+        </div>
       </div>
 
       {error ? (

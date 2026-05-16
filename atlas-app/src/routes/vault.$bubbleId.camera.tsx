@@ -46,7 +46,7 @@ function CameraPage() {
     refreshDevices();
     const onFocus = () => refreshDevices();
     window.addEventListener("focus", onFocus);
-    const id = setInterval(refreshDevices, 15000);
+    const id = setInterval(refreshDevices, 30000);
     return () => {
       window.removeEventListener("focus", onFocus);
       clearInterval(id);

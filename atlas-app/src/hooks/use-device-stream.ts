@@ -6,6 +6,10 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
+const VIEWER_PING_MS = 3000;
+const HEALTH_CHECK_MS = 4000;
+const STUCK_CYCLES_BEFORE_RECONNECT = 2;
+
 type SignalPayload =
   | { type: "offer"; sdp: string }
   | { type: "answer"; sdp: string }
@@ -20,15 +24,25 @@ function preferCameraConstraints(): MediaStreamConstraints {
   };
 }
 
+function hasLiveVideo(stream: MediaStream | null) {
+  return Boolean(stream?.getVideoTracks().some((t) => t.readyState === "live"));
+}
+
 export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "viewer") {
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const sessionRef = useRef(0);
+  const [connectKey, setConnectKey] = useState(0);
   const [viewerWatching, setViewerWatching] = useState(false);
   const [hasMedia, setHasMedia] = useState(false);
   const [waiting, setWaiting] = useState(role === "viewer");
   const [error, setError] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
+  const reconnect = useCallback(() => {
+    setConnectKey((k) => k + 1);
+  }, []);
 
   const attachToVideo = useCallback((stream: MediaStream | null) => {
     const el = videoRef.current;
@@ -52,26 +66,25 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
   useEffect(() => {
     if (!deviceId) return;
 
+    const session = ++sessionRef.current;
+    const isActive = () => sessionRef.current === session;
+
     setHasMedia(false);
     setViewerWatching(false);
     setWaiting(role === "viewer");
     setError(null);
     remoteStreamRef.current = null;
 
-    let disposed = false;
-    let generation = 0;
     let viewerReadyTimer: ReturnType<typeof setInterval> | null = null;
-    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let healthTimer: ReturnType<typeof setInterval> | null = null;
+    let stuckCycles = 0;
+    let lastOfferSentAt = 0;
     const pendingIce: RTCIceCandidateInit[] = [];
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-    const streamIsUp = () => {
-      const ice = pc.iceConnectionState;
-      return (
-        pc.connectionState === "connected" ||
-        ice === "connected" ||
-        ice === "completed"
-      );
+    const requestFullReconnect = () => {
+      if (!isActive()) return;
+      setConnectKey((k) => k + 1);
     };
 
     const drainIce = async () => {
@@ -81,7 +94,7 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch {
-          // stale candidate after renegotiation
+          // ignore stale candidates
         }
       }
     };
@@ -101,49 +114,30 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
       }
     };
 
+    const startViewerReadyPing = () => {
+      if (!isActive()) return;
+      sendSignal({ type: "viewer-ready" });
+      if (viewerReadyTimer) return;
+      viewerReadyTimer = setInterval(() => sendSignal({ type: "viewer-ready" }), VIEWER_PING_MS);
+    };
+
     const markBroadcasterViewerJoined = () => {
-      if (disconnectTimer) {
-        clearTimeout(disconnectTimer);
-        disconnectTimer = null;
-      }
+      if (!isActive()) return;
       setViewerWatching(true);
       setWaiting(false);
       setError(null);
     };
 
     const markViewerStreamReady = (stream: MediaStream) => {
-      if (disconnectTimer) {
-        clearTimeout(disconnectTimer);
-        disconnectTimer = null;
-      }
+      if (!isActive()) return;
       remoteStreamRef.current = stream;
       attachToVideo(stream);
       setHasMedia(true);
       setViewerWatching(true);
       setWaiting(false);
       setError(null);
+      stuckCycles = 0;
       stopViewerReadyPing();
-    };
-
-    const markViewerDisconnected = () => {
-      setViewerWatching(false);
-    };
-
-    const scheduleDisconnect = () => {
-      if (role === "broadcaster") return;
-      if (disconnectTimer) clearTimeout(disconnectTimer);
-      disconnectTimer = setTimeout(() => {
-        if (!streamIsUp()) {
-          markViewerDisconnected();
-          setHasMedia(false);
-          remoteStreamRef.current = null;
-          setWaiting(true);
-          if (!disposed && !viewerReadyTimer) {
-            sendSignal({ type: "viewer-ready" });
-            viewerReadyTimer = setInterval(() => sendSignal({ type: "viewer-ready" }), 4000);
-          }
-        }
-      }, 4000);
     };
 
     const channel = supabase.channel(`device-stream:${deviceId}`, {
@@ -151,7 +145,7 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
     });
 
     const sendSignal = (payload: SignalPayload) => {
-      if (disposed) return;
+      if (!isActive()) return;
       void channel.send({ type: "broadcast", event: "signal", payload });
     };
 
@@ -162,98 +156,118 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
     };
 
     pc.ontrack = (event) => {
+      if (role !== "viewer") return;
       const stream = event.streams[0] ?? (event.track ? new MediaStream([event.track]) : null);
-      if (!stream || role !== "viewer") return;
+      if (!stream) return;
       markViewerStreamReady(stream);
     };
 
     pc.onconnectionstatechange = () => {
+      if (!isActive()) return;
       const state = pc.connectionState;
-      if (state === "failed" || state === "closed") {
-        if (disconnectTimer) {
-          clearTimeout(disconnectTimer);
-          disconnectTimer = null;
-        }
-        if (role === "broadcaster") {
-          markViewerDisconnected();
-        } else {
-          markViewerDisconnected();
+      if (state === "failed" || state === "disconnected") {
+        if (role === "viewer") {
           setHasMedia(false);
           remoteStreamRef.current = null;
+          setViewerWatching(false);
           setWaiting(true);
-          setError("Connection lost. Keep the device camera page open and refresh Live view.");
-          if (!disposed) {
-            stopViewerReadyPing();
-            sendSignal({ type: "viewer-ready" });
-            viewerReadyTimer = setInterval(() => sendSignal({ type: "viewer-ready" }), 4000);
-          }
+          pendingIce.length = 0;
+          startViewerReadyPing();
+        } else {
+          setViewerWatching(false);
         }
-      } else if (state === "disconnected") {
-        scheduleDisconnect();
       }
     };
 
     const applyOffer = async (sdp: string) => {
-      const gen = generation;
-      if (streamIsUp()) return;
-      await pc.setRemoteDescription({ type: "offer", sdp });
-      if (disposed || gen !== generation) return;
-      await drainIce();
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      sendSignal({ type: "answer", sdp: answer.sdp ?? "" });
+      if (!isActive() || hasLiveVideo(remoteStreamRef.current)) return;
+
+      try {
+        pendingIce.length = 0;
+        await pc.setRemoteDescription({ type: "offer", sdp });
+        await drainIce();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal({ type: "answer", sdp: answer.sdp ?? "" });
+      } catch {
+        startViewerReadyPing();
+      }
     };
 
     const applyAnswer = async (sdp: string) => {
-      const gen = generation;
-      if (pc.signalingState !== "have-local-offer") return;
-      await pc.setRemoteDescription({ type: "answer", sdp });
-      if (disposed || gen !== generation) return;
-      await drainIce();
-      markBroadcasterViewerJoined();
+      if (!isActive() || pc.signalingState !== "have-local-offer") return;
+      try {
+        await pc.setRemoteDescription({ type: "answer", sdp });
+        await drainIce();
+        markBroadcasterViewerJoined();
+      } catch {
+        startViewerReadyPing();
+      }
     };
 
-    const resendOffer = async () => {
-      const gen = generation;
-      if (streamIsUp()) return;
-      const localSdp = pc.localDescription?.sdp;
-      if (localSdp && pc.signalingState === "have-local-offer") {
-        sendSignal({ type: "offer", sdp: localSdp });
+    const sendOffer = async (iceRestart = false) => {
+      if (!isActive() || !hasLiveVideo(localStreamRef.current)) return;
+      try {
+        pendingIce.length = 0;
+        const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
+        await pc.setLocalDescription(offer);
+        lastOfferSentAt = Date.now();
+        sendSignal({ type: "offer", sdp: offer.sdp ?? "" });
+      } catch {
+        // camera may still be starting
+      }
+    };
+
+    const nudgeSignaling = () => {
+      if (!isActive()) return;
+      if (role === "viewer") {
+        if (!hasLiveVideo(remoteStreamRef.current)) {
+          startViewerReadyPing();
+        }
         return;
       }
-      const offer = await pc.createOffer(
-        pc.signalingState === "stable" ? { iceRestart: true } : undefined,
-      );
-      await pc.setLocalDescription(offer);
-      if (disposed || gen !== generation) return;
-      sendSignal({ type: "offer", sdp: offer.sdp ?? "" });
+      if (hasLiveVideo(localStreamRef.current)) {
+        void sendOffer(pc.signalingState === "stable");
+      }
     };
 
-    channel.on("broadcast", { event: "signal" }, async ({ payload }) => {
-      if (disposed) return;
+    channel.on("broadcast", { event: "signal" }, ({ payload }) => {
+      if (!isActive()) return;
       const msg = payload as SignalPayload;
 
-      try {
-        if (msg.type === "viewer-ready" && role === "broadcaster") {
-          if (streamIsUp()) return;
-          await resendOffer();
-        } else if (msg.type === "offer" && role === "viewer") {
-          if (streamIsUp()) return;
-          await applyOffer(msg.sdp);
-        } else if (msg.type === "answer" && role === "broadcaster") {
-          await applyAnswer(msg.sdp);
-        } else if (msg.type === "ice" && msg.candidate) {
-          queueIce(msg.candidate);
+      if (msg.type === "viewer-ready" && role === "broadcaster") {
+        if (!hasLiveVideo(localStreamRef.current)) return;
+
+        const now = Date.now();
+        if (pc.signalingState === "have-local-offer" && pc.localDescription?.sdp) {
+          sendSignal({ type: "offer", sdp: pc.localDescription.sdp });
+          return;
         }
-      } catch {
-        // SDP/ICE can race during setup; viewer-ready will retry
+
+        if (now - lastOfferSentAt < 5000) return;
+        void sendOffer(pc.signalingState === "stable");
+        return;
+      }
+
+      if (msg.type === "offer" && role === "viewer") {
+        void applyOffer(msg.sdp);
+        return;
+      }
+
+      if (msg.type === "answer" && role === "broadcaster") {
+        void applyAnswer(msg.sdp);
+        return;
+      }
+
+      if (msg.type === "ice" && msg.candidate) {
+        queueIce(msg.candidate);
       }
     });
 
     const startBroadcaster = async () => {
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia(preferCameraConstraints());
-        if (disposed) {
+        if (!isActive()) {
           mediaStream.getTracks().forEach((t) => t.stop());
           return;
         }
@@ -264,11 +278,10 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
         attachToVideo(mediaStream);
 
         mediaStream.getTracks().forEach((track) => pc.addTrack(track, mediaStream));
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        sendSignal({ type: "offer", sdp: offer.sdp ?? "" });
+        await sendOffer(false);
         setWaiting(false);
       } catch (err) {
+        if (!isActive()) return;
         setError(
           err instanceof Error && err.name === "NotAllowedError"
             ? "Camera permission is required to stream."
@@ -277,33 +290,66 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
       }
     };
 
-    void channel.subscribe((status) => {
-      if (status !== "SUBSCRIBED" || disposed) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !isActive()) return;
+      nudgeSignaling();
+    };
 
-      if (role === "viewer") {
-        sendSignal({ type: "viewer-ready" });
-        viewerReadyTimer = setInterval(() => sendSignal({ type: "viewer-ready" }), 4000);
-      } else {
-        void startBroadcaster();
+    healthTimer = setInterval(() => {
+      if (!isActive()) return;
+
+      const videoOk =
+        role === "viewer"
+          ? hasLiveVideo(remoteStreamRef.current)
+          : hasLiveVideo(localStreamRef.current);
+
+      if (videoOk) {
+        stuckCycles = 0;
+        return;
+      }
+
+      stuckCycles += 1;
+      nudgeSignaling();
+
+      if (stuckCycles >= STUCK_CYCLES_BEFORE_RECONNECT) {
+        stuckCycles = 0;
+        requestFullReconnect();
+      }
+    }, HEALTH_CHECK_MS);
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", nudgeSignaling);
+
+    void channel.subscribe((status) => {
+      if (!isActive()) return;
+
+      if (status === "SUBSCRIBED") {
+        if (role === "viewer") {
+          startViewerReadyPing();
+        } else {
+          void startBroadcaster();
+        }
+        return;
+      }
+
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        requestFullReconnect();
       }
     });
 
     return () => {
-      disposed = true;
-      generation += 1;
+      sessionRef.current += 1;
       stopViewerReadyPing();
-      if (disconnectTimer) clearTimeout(disconnectTimer);
+      if (healthTimer) clearInterval(healthTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", nudgeSignaling);
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
       remoteStreamRef.current = null;
-      setLocalStream(null);
-      setHasMedia(false);
-      setViewerWatching(false);
       pc.close();
-      void channel.unsubscribe();
       void supabase.removeChannel(channel);
     };
-  }, [deviceId, role, attachToVideo]);
+  }, [deviceId, role, attachToVideo, connectKey]);
 
   return {
     videoRef: setVideoRef,
@@ -313,5 +359,6 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
     waiting,
     error,
     localStream,
+    reconnect,
   };
 }
