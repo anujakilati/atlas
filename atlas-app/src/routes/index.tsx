@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Lock, Unlock, Wifi, Battery, Bell, Key, ChevronRight, ShieldCheck, Video, Plus } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import lockHero from "@/assets/lock-hero.jpg";
 
 export const Route = createFileRoute("/")({
@@ -63,17 +63,7 @@ function Home() {
             Main entrance
           </h2>
 
-          <button
-            onClick={() => setLocked((v) => !v)}
-            className={`group mt-5 flex w-full items-center justify-between rounded-2xl border border-border bg-background/40 p-2 pl-5 transition-all ${
-              locked ? "" : "ring-gold"
-            }`}
-          >
-            <span className="font-medium">{locked ? "Slide to unlock" : "Slide to lock"}</span>
-            <span className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-gold text-gold-foreground shadow-gold transition-transform group-active:scale-95">
-              {locked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
-            </span>
-          </button>
+          <SlideToLock locked={locked} onToggle={() => setLocked((v) => !v)} />
         </div>
       </section>
 
@@ -99,6 +89,118 @@ function Home() {
           <ActivityRow time="7:03 AM" title="Unknown face flagged" who="Doorbell · AI alert" tone="danger" />
         </ul>
       </section>
+    </div>
+  );
+}
+
+const THUMB_SIZE = 48;
+const SLIDE_THRESHOLD = 0.85;
+
+function SlideToLock({ locked, onToggle }: { locked: boolean; onToggle: () => void }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
+  const [maxOffset, setMaxOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const dragStart = useRef({ x: 0, offset: 0 });
+
+  const measure = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const trackInset = 4;
+    const next = Math.max(0, track.clientWidth - THUMB_SIZE - trackInset * 2);
+    setMaxOffset(next);
+  }, []);
+
+  useEffect(() => {
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
+
+  const setSlideOffset = useCallback((value: number) => {
+    offsetRef.current = value;
+    setOffset(value);
+  }, []);
+
+  useEffect(() => {
+    setSlideOffset(locked ? 0 : maxOffset);
+  }, [locked, maxOffset, setSlideOffset]);
+
+  const progress = maxOffset > 0 ? offset / maxOffset : 0;
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draggingRef.current = true;
+    setDragging(true);
+    dragStart.current = { x: e.clientX, offset };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!draggingRef.current) return;
+    const delta = e.clientX - dragStart.current.x;
+    const next = Math.max(0, Math.min(maxOffset, dragStart.current.offset + delta));
+    setSlideOffset(next);
+  };
+
+  const finishDrag = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+
+    const currentProgress = maxOffset > 0 ? offsetRef.current / maxOffset : 0;
+    const shouldUnlock = locked && currentProgress >= SLIDE_THRESHOLD;
+    const shouldLock = !locked && currentProgress <= 1 - SLIDE_THRESHOLD;
+
+    if (shouldUnlock || shouldLock) {
+      onToggle();
+    } else {
+      setSlideOffset(locked ? 0 : maxOffset);
+    }
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      className={`relative mt-5 h-14 w-full overflow-hidden rounded-2xl border border-border bg-background/40 touch-none select-none transition-shadow ${
+        locked ? "" : "ring-gold"
+      }`}
+    >
+      <div
+        className="absolute inset-y-1 left-1 rounded-xl bg-gradient-gold/25"
+        style={{
+          width: offset + THUMB_SIZE,
+          transition: dragging ? "none" : "width 0.35s cubic-bezier(0.34, 1.2, 0.64, 1)",
+        }}
+      />
+      <span
+        className="pointer-events-none absolute inset-0 flex items-center pl-5 font-medium"
+        style={{
+          opacity: 1 - progress * 0.65,
+          transition: dragging ? "none" : "opacity 0.25s ease",
+        }}
+      >
+        {locked ? "Slide to unlock" : "Slide to lock"}
+      </span>
+      <button
+        type="button"
+        data-thumb
+        aria-label={locked ? "Slide to unlock" : "Slide to lock"}
+        className="absolute top-1 left-1 z-10 grid h-12 w-12 cursor-grab place-items-center rounded-xl bg-gradient-gold text-gold-foreground shadow-gold active:cursor-grabbing active:scale-95"
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: dragging ? "none" : "transform 0.35s cubic-bezier(0.34, 1.2, 0.64, 1)",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onLostPointerCapture={finishDrag}
+      >
+        {locked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
+      </button>
     </div>
   );
 }
