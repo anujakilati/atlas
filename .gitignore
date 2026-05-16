@@ -32,3 +32,8 @@ dist-ssr
 *.sw?
 
 .env
+
+# Local detection pipeline output (not app source)
+data/events.db
+storage/clips/
+storage/frames/
