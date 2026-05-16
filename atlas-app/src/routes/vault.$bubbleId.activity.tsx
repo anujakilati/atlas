@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, User } from "lucide-react";
+import { AlertTriangle, Play, User, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { type DeviceEvent, type Character, fetchDeviceEvents, fetchCharacters } from "../lib/activities";
 
@@ -64,6 +64,7 @@ function ActivityPage() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [loadingMoments, setLoadingMoments] = useState(true);
   const [loadingCharacters, setLoadingCharacters] = useState(true);
+  const [playingEventId, setPlayingEventId] = useState<string | null>(null);
 
   const loadMoments = useCallback(() => {
     void fetchDeviceEvents()
@@ -143,6 +144,8 @@ function ActivityPage() {
                     const subtitle = [ev.event_subtype, ev.risk_level ? `${ev.risk_level} risk` : null]
                       .filter(Boolean)
                       .join(" · ");
+                    const replayUrl = ev.metadata?.replay_url as string | undefined;
+                    const isPlaying = playingEventId === ev.id;
                     return (
                       <li key={ev.id} className="relative">
                         <span className="absolute -left-[27px] top-3 h-2 w-2 rounded-full bg-gold" />
@@ -157,8 +160,29 @@ function ActivityPage() {
                                 <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
                               )}
                             </div>
-                            <span className="shrink-0 text-xs text-muted-foreground">{formatTime(ev.created_at)}</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {replayUrl && (
+                                <button
+                                  onClick={() => setPlayingEventId(isPlaying ? null : ev.id)}
+                                  className="grid h-7 w-7 place-items-center rounded-lg bg-gold/15 text-gold hover:bg-gold/25 transition-colors"
+                                  aria-label={isPlaying ? "Close replay" : "Play replay"}
+                                >
+                                  {isPlaying ? <X className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                                </button>
+                              )}
+                              <span className="text-xs text-muted-foreground">{formatTime(ev.created_at)}</span>
+                            </div>
                           </div>
+                          {isPlaying && replayUrl && (
+                            <div className="mt-3">
+                              <video
+                                src={replayUrl}
+                                controls
+                                autoPlay
+                                className="w-full rounded-xl bg-black/20 max-h-64 object-contain"
+                              />
+                            </div>
+                          )}
                         </div>
                       </li>
                     );

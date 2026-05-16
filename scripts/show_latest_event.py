@@ -357,6 +357,82 @@ def print_character_profile(profile, event_id):
     print(sep)
 
 
+def upload_replay_to_storage(replay_path, event_ts, max_size_mb=50, max_videos=20):
+    """Upload the replay MP4 to Supabase Storage and return its public URL.
+
+    Skips upload if the file exceeds max_size_mb. Prunes the oldest files in
+    the bucket if more than max_videos are stored.
+    """
+    import requests as req
+    url = os.environ.get("VITE_SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        return None
+
+    size_bytes = os.path.getsize(replay_path)
+    if size_bytes > max_size_mb * 1024 * 1024:
+        print(f"[Storage] Replay is {size_bytes / 1e6:.1f} MB — exceeds {max_size_mb} MB limit, skipping upload.")
+        return None
+
+    bucket = "replays"
+    filename = f"event_{int(event_ts)}_replay.mp4"
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "video/mp4",
+    }
+
+    # Create bucket if needed (idempotent).
+    try:
+        req.post(
+            f"{url}/storage/v1/bucket",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"id": bucket, "name": bucket, "public": True},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+    # Upload the video.
+    try:
+        with open(replay_path, "rb") as f:
+            resp = req.post(
+                f"{url}/storage/v1/object/{bucket}/{filename}",
+                headers={**headers, "x-upsert": "true"},
+                data=f,
+                timeout=60,
+            )
+        resp.raise_for_status()
+        public_url = f"{url}/storage/v1/object/public/{bucket}/{filename}"
+        print(f"[Storage] Replay uploaded: {public_url}")
+    except Exception as e:
+        logger.warning("Failed to upload replay: %s", e)
+        return None
+
+    # Prune oldest files if over the limit.
+    try:
+        list_resp = req.post(
+            f"{url}/storage/v1/object/list/{bucket}",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"prefix": "", "limit": 200, "offset": 0, "sortBy": {"column": "created_at", "order": "asc"}},
+            timeout=10,
+        )
+        files = list_resp.json() if list_resp.ok else []
+        if isinstance(files, list) and len(files) > max_videos:
+            to_delete = [f["name"] for f in files[:len(files) - max_videos]]
+            req.delete(
+                f"{url}/storage/v1/object/{bucket}",
+                headers={**headers, "Content-Type": "application/json"},
+                json={"prefixes": to_delete},
+                timeout=10,
+            )
+            print(f"[Storage] Pruned {len(to_delete)} old replay(s) (keeping last {max_videos}).")
+    except Exception:
+        pass
+
+    return public_url
+
+
 def upload_crop_to_storage(cropped_frame, event_ts):
     """Upload a cropped suspect image to Supabase Storage and return its public URL."""
     import requests as req
@@ -489,7 +565,7 @@ def is_duplicate_character(new_profile, new_crop, sb_url, key, threshold=0.80):
     return False
 
 
-def push_to_supabase(profile, event_meta, replay_path, crop_url=None, score=0.0, cropped_frame=None):
+def push_to_supabase(profile, event_meta, replay_path, crop_url=None, score=0.0, cropped_frame=None, replay_url=None):
     """Insert a device_event + character record into Supabase."""
     import requests as req
     sb_url = os.environ.get("VITE_SUPABASE_URL")
@@ -527,6 +603,7 @@ def push_to_supabase(profile, event_meta, replay_path, crop_url=None, score=0.0,
             "metadata": {
                 "source": event_meta.get("source"),
                 "replay_path": replay_path,
+                "replay_url": replay_url,
                 "profile_crop_url": crop_url,
                 "character_profile": profile or {},
             },
@@ -675,7 +752,7 @@ def main():
         video_dir = os.path.join(CONFIG['storage']['clips_dir'], 'replay')
         os.makedirs(video_dir, exist_ok=True)
         replay_path = os.path.join(video_dir, f'event_{int(ts)}.mp4')
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         writer = cv2.VideoWriter(replay_path, fourcc, source_fps, (out_w, out_h))
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         current = start_frame
@@ -739,7 +816,8 @@ def main():
             print(f"[Character Profile] Crop saved to: {profile_img_path}")
 
             crop_url = upload_crop_to_storage(cropped, ts)
-            push_to_supabase(profile, meta_obj, replay_path, crop_url=crop_url, score=score, cropped_frame=cropped)
+            replay_url = upload_replay_to_storage(replay_path, ts)
+            push_to_supabase(profile, meta_obj, replay_path, crop_url=crop_url, score=score, cropped_frame=cropped, replay_url=replay_url)
         else:
             print("\n[Character Profile] No clear suspect frame found during replay.")
 
