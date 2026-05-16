@@ -18,7 +18,7 @@ export function DeviceLivePlayer({
   muted,
   onMutedChange,
 }: DeviceLivePlayerProps) {
-  const { videoRef, hasMedia, waiting, error, reconnect } = useDeviceStream(deviceId, "viewer");
+  const { videoRef, hasMedia, waiting, error, reconnect, requestSaveRecording } = useDeviceStream(deviceId, "viewer");
   const storageLiveSrc = useStorageLiveFeed(deviceId, deviceOnline && !hasMedia);
 
   const showWebRtc = hasMedia;
@@ -98,6 +98,22 @@ export function DeviceLivePlayer({
       ) : null}
 
       <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between p-4">
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              const title = window.prompt("Save clip title (e.g. Person hurt)") ?? "";
+              if (!title) return;
+              await requestSaveRecording?.(title);
+              // optional feedback could be added
+            } catch (e) {
+              // ignore
+            }
+          }}
+          className="glass mr-2 hidden h-9 rounded-full border border-white/10 px-3 text-xs text-white md:inline-block"
+        >
+          Save clip
+        </button>
         <button
           type="button"
           onClick={() => onMutedChange(!muted)}

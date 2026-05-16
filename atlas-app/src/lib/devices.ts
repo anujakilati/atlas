@@ -41,6 +41,7 @@ export type DeviceRecording = {
   publicUrl: string;
   durationMs: number | null;
   createdAt: string;
+  title?: string;
 };
 
 type DeviceRow = {
@@ -207,7 +208,7 @@ export async function setDeviceStatus(deviceId: string, status: Device["status"]
   }
 }
 
-export async function saveRecording(deviceId: string, blob: Blob, durationMs: number) {
+export async function saveRecording(deviceId: string, blob: Blob, durationMs: number, title = "") {
   const stamp = Date.now();
   const storagePath = `${deviceId}/${stamp}.webm`;
 
@@ -220,6 +221,7 @@ export async function saveRecording(deviceId: string, blob: Blob, durationMs: nu
   const { error: rowError } = await supabase.from("device_recordings").insert({
     device: deviceId,
     storage_path: storagePath,
+    title: title,
     duration_ms: durationMs,
   });
   if (rowError) throw new Error(formatDbError(rowError, "Could not save recording."));

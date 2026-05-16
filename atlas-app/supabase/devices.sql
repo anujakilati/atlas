@@ -36,6 +36,7 @@ create table if not exists public.device_recordings (
   id uuid primary key default gen_random_uuid(),
   device uuid not null references public.devices (id) on delete cascade,
   storage_path text not null,
+  title text not null default '',
   duration_ms int,
   created_at timestamptz not null default now()
 );

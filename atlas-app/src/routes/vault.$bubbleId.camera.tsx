@@ -173,10 +173,8 @@ function CameraPage() {
                   <Play className="h-4 w-4" />
                 </a>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{active?.name ?? "Camera"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleString()}
-                  </p>
+                  <p className="truncate text-sm">{r.title ? r.title : active?.name ?? "Camera"}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   {r.durationMs ? (

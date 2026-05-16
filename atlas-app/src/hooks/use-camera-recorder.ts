@@ -20,9 +20,7 @@ export function useCameraRecorder({
   deviceId,
   stream,
   enabled,
-  saveClips = false,
 }: UseCameraRecorderOptions) {
-  const clipTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -52,23 +50,49 @@ export function useCameraRecorder({
 
     const uploadLive = () =>
       recordOnce(3000, (blob) => void uploadLiveChunk(deviceId, blob).catch(() => undefined));
-    const saveClip = () =>
-      recordOnce(CLIP_MS, (blob) => void saveRecording(deviceId, blob, CLIP_MS).catch(() => undefined));
 
     const startDelay = setTimeout(() => {
       void uploadLive();
       liveTimer.current = setInterval(uploadLive, LIVE_INTERVAL_MS);
-      if (saveClips) {
-        void saveClip();
-        clipTimer.current = setInterval(saveClip, CLIP_MS);
-      }
     }, 2000);
 
     return () => {
       clearTimeout(startDelay);
-      if (clipTimer.current) clearInterval(clipTimer.current);
       if (liveTimer.current) clearInterval(liveTimer.current);
       recordStream.getTracks().forEach((t) => t.stop());
     };
-  }, [deviceId, stream, enabled, saveClips]);
+  }, [deviceId, stream, enabled]);
+
+  const saveNow = async (title?: string) => {
+    if (!enabled || !stream || !deviceId) return;
+    const recordStream = stream.clone();
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+      ? "video/webm;codecs=vp8"
+      : "video/webm";
+
+    await new Promise<void>((resolve) => {
+      const chunks: Blob[] = [];
+      const rec = new MediaRecorder(recordStream, { mimeType: mime, videoBitsPerSecond: 500_000 });
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      rec.onstop = async () => {
+        if (chunks.length === 0) return resolve();
+        try {
+          await saveRecording(deviceId, new Blob(chunks, { type: mime }), CLIP_MS, title ?? "");
+        } catch (e) {
+          // swallow; caller can log if needed
+          // eslint-disable-next-line no-console
+          console.error("saveNow error:", e);
+        }
+        resolve();
+      };
+      rec.start(250);
+      setTimeout(() => {
+        if (rec.state === "recording") rec.stop();
+      }, CLIP_MS);
+    });
+  };
+
+  return { saveNow };
 }

@@ -47,10 +47,8 @@ function DeviceBroadcasterSession({
   session: DeviceSession;
   onDisconnect: () => void;
 }) {
-  const { videoRef, viewerWatching, hasMedia, error: streamError, localStream, reconnect } = useDeviceStream(
-    session.deviceId,
-    "broadcaster",
-  );
+  const { videoRef, viewerWatching, hasMedia, error: streamError, localStream, reconnect, setSignalHandler } =
+    useDeviceStream(session.deviceId, "broadcaster");
 
   useEffect(() => {
     const onVisible = () => {
@@ -60,12 +58,16 @@ function DeviceBroadcasterSession({
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [reconnect]);
 
-  useCameraRecorder({
+  const { saveNow } = useCameraRecorder({
     deviceId: session.deviceId,
     stream: localStream,
     enabled: Boolean(localStream && hasMedia),
-    saveClips: false,
   });
+
+  useEffect(() => {
+    if (!setSignalHandler) return;
+    setSignalHandler({ onSaveRequest: saveNow });
+  }, [setSignalHandler, saveNow]);
 
   useEffect(() => {
     if (!hasMedia) return;

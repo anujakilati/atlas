@@ -14,7 +14,8 @@ type SignalPayload =
   | { type: "offer"; sdp: string }
   | { type: "answer"; sdp: string }
   | { type: "ice"; candidate: RTCIceCandidateInit }
-  | { type: "viewer-ready" };
+  | { type: "viewer-ready" }
+  | { type: "save-recording"; title?: string };
 
 function preferCameraConstraints(): MediaStreamConstraints {
   const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
@@ -42,6 +43,13 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
 
   const reconnect = useCallback(() => {
     setConnectKey((k) => k + 1);
+  }, []);
+
+  const signalHandlerRef = useRef<{ onSaveRequest?: (title?: string) => void } | null>(null);
+  const sendSignalRef = useRef<((payload: SignalPayload) => void) | null>(null);
+
+  const requestSaveRecording = useCallback((title?: string) => {
+    sendSignalRef.current?.({ type: "save-recording", title });
   }, []);
 
   const attachToVideo = useCallback((stream: MediaStream | null) => {
@@ -148,6 +156,7 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
       if (!isActive()) return;
       void channel.send({ type: "broadcast", event: "signal", payload });
     };
+    sendSignalRef.current = sendSignal;
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -262,6 +271,10 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
       if (msg.type === "ice" && msg.candidate) {
         queueIce(msg.candidate);
       }
+      // custom save-recording signal
+      if (msg.type === "save-recording" && role === "broadcaster") {
+        signalHandlerRef.current?.onSaveRequest?.(msg.title);
+      }
     });
 
     const startBroadcaster = async () => {
@@ -360,5 +373,9 @@ export function useDeviceStream(deviceId: string | null, role: "broadcaster" | "
     error,
     localStream,
     reconnect,
+      requestSaveRecording,
+      setSignalHandler: (h: { onSaveRequest?: (title?: string) => void }) => {
+        signalHandlerRef.current = h;
+      },
   };
 }
