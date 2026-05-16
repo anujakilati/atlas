@@ -45,8 +45,8 @@ create index if not exists device_recordings_device_idx on public.device_recordi
 alter table public.devices enable row level security;
 alter table public.device_recordings enable row level security;
 
-grant select, insert, update, delete on table public.devices to authenticated;
-grant select, insert on table public.device_recordings to authenticated, anon;
+grant select, insert, delete on table public.devices to authenticated;
+grant select, insert, delete on table public.device_recordings to authenticated, anon;
 
 drop policy if exists "Members can view devices" on public.devices;
 drop policy if exists "Members can insert devices" on public.devices;
@@ -91,6 +91,7 @@ create policy "Members can delete devices"
 
 drop policy if exists "Members can view recordings" on public.device_recordings;
 drop policy if exists "Camera can insert recordings" on public.device_recordings;
+drop policy if exists "Members can delete recordings" on public.device_recordings;
 
 create policy "Members can view recordings"
   on public.device_recordings for select to authenticated
@@ -105,6 +106,16 @@ create policy "Members can view recordings"
 create policy "Camera can insert recordings"
   on public.device_recordings for insert to anon, authenticated
   with check (true);
+
+create policy "Members can delete recordings"
+  on public.device_recordings for delete to authenticated
+  using (
+    exists (
+      select 1 from public.devices d
+      join public.bubbles b on b.id = d.bubble
+      where d.id = device and auth.uid() = any (coalesce(b.members, '{}'::uuid[]))
+    )
+  );
 
 -- Device app: register with token (no login)
 create or replace function public.get_device_by_token(p_token text)

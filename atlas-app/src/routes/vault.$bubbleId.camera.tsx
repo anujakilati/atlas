@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Play, Video } from "lucide-react";
+import { Play, Video, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchBubbleDevices,
   fetchDeviceRecordings,
+  deleteRecording,
   type Device,
   type DeviceRecording,
 } from "@/lib/devices";
@@ -31,6 +32,8 @@ function CameraPage() {
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<Device | null>(null);
   const [muted, setMuted] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const refreshDevices = useCallback(() => {
     void fetchBubbleDevices(bubbleId)
@@ -66,6 +69,21 @@ function CameraPage() {
     }, 20000);
     return () => clearInterval(id);
   }, [active?.id]);
+
+  const handleDeleteRecording = async (recordingId: string, storagePath: string) => {
+    setDeletingId(recordingId);
+    setDeleteError(null);
+    try {
+      await deleteRecording(recordingId, storagePath);
+      setRecordings((prev) => prev.filter((r) => r.id !== recordingId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete recording";
+      console.error("Delete recording error:", error);
+      setDeleteError(message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="px-5 pt-12">
@@ -133,6 +151,11 @@ function CameraPage() {
 
       <section className="mt-7">
         <h2 className="font-display text-2xl">Recordings</h2>
+        {deleteError ? (
+          <div className="mt-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+            {deleteError}
+          </div>
+        ) : null}
         {recordings.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
             Clips appear here while the device camera is streaming.
@@ -155,11 +178,21 @@ function CameraPage() {
                     {new Date(r.createdAt).toLocaleString()}
                   </p>
                 </div>
-                {r.durationMs ? (
-                  <span className="text-xs text-muted-foreground">
-                    {Math.round(r.durationMs / 1000)}s
-                  </span>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {r.durationMs ? (
+                    <span className="text-xs text-muted-foreground">
+                      {Math.round(r.durationMs / 1000)}s
+                    </span>
+                  ) : null}
+                  <button
+                    onClick={() => handleDeleteRecording(r.id, r.storagePath)}
+                    disabled={deletingId === r.id}
+                    className="p-2 text-muted-foreground hover:text-destructive disabled:opacity-50 transition-colors"
+                    aria-label="Delete recording"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

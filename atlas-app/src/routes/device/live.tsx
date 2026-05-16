@@ -64,7 +64,7 @@ function DeviceBroadcasterSession({
     deviceId: session.deviceId,
     stream: localStream,
     enabled: Boolean(localStream && hasMedia),
-    saveClips: viewerWatching,
+    saveClips: false,
   });
 
   useEffect(() => {

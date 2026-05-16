@@ -254,6 +254,22 @@ export async function fetchDeviceRecordings(deviceId: string) {
   })) satisfies DeviceRecording[];
 }
 
+export async function deleteRecording(recordingId: string, storagePath: string) {
+  // Delete from storage first
+  const { error: storageError } = await supabase.storage.from(BUCKET).remove([storagePath]);
+  if (storageError) {
+    console.error("Storage deletion error:", storageError);
+    throw new Error(storageError.message || "Could not delete video file.");
+  }
+
+  // Delete from database
+  const { error: dbError } = await supabase.from("device_recordings").delete().eq("id", recordingId);
+  if (dbError) {
+    console.error("Database deletion error:", dbError);
+    throw new Error(formatDbError(dbError, "Could not delete recording from database."));
+  }
+}
+
 export function contactShareLinks(contact: string, token: string, deviceName: string) {
   const trimmed = contact.trim();
   if (!trimmed) return {};
