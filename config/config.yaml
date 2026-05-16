@@ -1,0 +1,16 @@
+ingestion:
+  default_fps: 5
+  max_frame_queue: 256
+detection:
+  conf_threshold: 0.35
+  iou_threshold: 0.5
+tracking:
+  max_age: 30
+  min_hits: 3
+vlm:
+  enabled: true
+  endpoint: http://localhost:11434
+storage:
+  frames_dir: ./storage/frames
+  clips_dir: ./storage/clips
+  db_path: ./data/events.db
