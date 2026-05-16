@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas_pass
+      POSTGRES_DB: atlas
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    depends_on:
+      - db
+    volumes:
+      - ./storage:/app/storage
+      - ./yolov8n.pt:/app/yolov8n.pt:ro
+    ports:
+      - "8000:8000"
+
+volumes:
+  db_data:
