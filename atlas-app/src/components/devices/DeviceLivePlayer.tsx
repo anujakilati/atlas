@@ -1,4 +1,4 @@
-import { Mic, MicOff, Volume2, Maximize2, Circle, Video, RefreshCw } from "lucide-react";
+import { Mic, MicOff, Volume2, Maximize2, Circle, Video } from "lucide-react";
 import { useDeviceStream } from "@/hooks/use-device-stream";
 import { useStorageLiveFeed } from "@/hooks/use-storage-live-feed";
 
@@ -8,6 +8,7 @@ type DeviceLivePlayerProps = {
   deviceOnline: boolean;
   muted: boolean;
   onMutedChange: (muted: boolean) => void;
+  showControls?: boolean;
 };
 
 /** Key by deviceId so switching cameras fully resets WebRTC. */
@@ -17,8 +18,9 @@ export function DeviceLivePlayer({
   deviceOnline,
   muted,
   onMutedChange,
+  showControls = true,
 }: DeviceLivePlayerProps) {
-  const { videoRef, hasMedia, waiting, error, reconnect } = useDeviceStream(deviceId, "viewer");
+  const { videoRef, hasMedia, waiting, error } = useDeviceStream(deviceId, "viewer");
   const storageLiveSrc = useStorageLiveFeed(deviceId, deviceOnline && !hasMedia);
 
   const showWebRtc = hasMedia;
@@ -62,7 +64,7 @@ export function DeviceLivePlayer({
         <div className="scan-line pointer-events-none absolute inset-x-0 z-30 h-px bg-gold/60" />
       ) : null}
 
-      <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between p-4 text-xs text-white/80">
+      <div className="absolute inset-x-0 top-0 z-30 flex items-center p-4 text-xs text-white/80">
         {showWebRtc ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-black/40 px-2.5 py-1 backdrop-blur">
             <Circle className="h-2 w-2 fill-danger text-danger" /> LIVE
@@ -76,19 +78,6 @@ export function DeviceLivePlayer({
             {deviceOnline ? "Connecting…" : "Offline"}
           </span>
         )}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={reconnect}
-            className="grid h-8 w-8 place-items-center rounded-full bg-black/40 backdrop-blur"
-            aria-label="Reconnect stream"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-          <span className="rounded-full bg-black/40 px-2.5 py-1 backdrop-blur">
-            {showWebRtc ? "Direct" : showStorage ? "Cloud" : "—"}
-          </span>
-        </div>
       </div>
 
       {error ? (
@@ -97,27 +86,29 @@ export function DeviceLivePlayer({
         </p>
       ) : null}
 
-      <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between p-4">
-        <button
-          type="button"
-          onClick={() => onMutedChange(!muted)}
-          className="glass grid h-11 w-11 place-items-center rounded-full border border-white/10 text-white"
-        >
-          {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-        </button>
-        <button
-          type="button"
-          className="grid h-14 w-14 place-items-center rounded-full bg-gradient-gold text-gold-foreground shadow-gold"
-        >
-          <Volume2 className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          className="glass grid h-11 w-11 place-items-center rounded-full border border-white/10 text-white"
-        >
-          <Maximize2 className="h-4 w-4" />
-        </button>
-      </div>
+      {showControls ? (
+        <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between p-4">
+          <button
+            type="button"
+            onClick={() => onMutedChange(!muted)}
+            className="glass grid h-11 w-11 place-items-center rounded-full border border-white/10 text-white"
+          >
+            {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            className="grid h-14 w-14 place-items-center rounded-full bg-gradient-gold text-gold-foreground shadow-gold"
+          >
+            <Volume2 className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            className="glass grid h-11 w-11 place-items-center rounded-full border border-white/10 text-white"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

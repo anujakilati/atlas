@@ -270,6 +270,16 @@ export async function deleteRecording(recordingId: string, storagePath: string) 
   }
 }
 
+export async function deleteDevice(deviceId: string, bubbleId: string) {
+  const { data: bubbleRow } = await supabase.from("bubbles").select("devices").eq("id", bubbleId).single();
+  if (bubbleRow) {
+    const ids = (bubbleRow.devices as string[] | null) ?? [];
+    await supabase.from("bubbles").update({ devices: ids.filter((id) => id !== deviceId) }).eq("id", bubbleId);
+  }
+  const { error } = await supabase.from("devices").delete().eq("id", deviceId);
+  if (error) throw new Error(formatDbError(error, "Could not delete camera."));
+}
+
 export function contactShareLinks(contact: string, token: string, deviceName: string) {
   const trimmed = contact.trim();
   if (!trimmed) return {};
