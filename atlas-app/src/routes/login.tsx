@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthCard } from "@/components/auth/AuthCard";
-import { signIn } from "@/lib/auth";
+import { formatAuthError, signIn } from "@/lib/auth";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -24,7 +24,7 @@ function LoginPage() {
       await signIn(email, password);
       await navigate({ to: "/" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not log in.");
+      setError(formatAuthError(err));
     } finally {
       setLoading(false);
     }

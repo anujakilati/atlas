@@ -1,28 +1,35 @@
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { Home, Video, ScrollText, Sparkles } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/auth-context";
-
-const tabs = [
-  { to: "/", icon: Home, label: "Home" },
-  { to: "/camera", icon: Video, label: "Camera" },
-  { to: "/activity", icon: ScrollText, label: "Activity" },
-  { to: "/commands", icon: Sparkles, label: "AI" },
-] as const;
 
 export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { session, loading } = useAuth();
   const isAuthRoute = pathname === "/login" || pathname === "/signup";
+  const isDashboard = pathname === "/";
+
+  const bubbleId = useMemo(() => {
+    const match = pathname.match(/^\/vault\/([^/]+)/);
+    return match?.[1];
+  }, [pathname]);
+
+  const tabs = bubbleId
+    ? [
+        { to: "/vault/$bubbleId" as const, label: "Home", icon: Home },
+        { to: "/vault/$bubbleId/camera" as const, label: "Camera", icon: Video },
+        { to: "/vault/$bubbleId/activity" as const, label: "Activity", icon: ScrollText },
+        { to: "/vault/$bubbleId/commands" as const, label: "AI", icon: Sparkles },
+      ]
+    : [];
 
   useEffect(() => {
     if (loading) return;
     if (!session && !isAuthRoute) {
-      void navigate({ to: "/login" });
-    }
-    if (session && isAuthRoute) {
-      void navigate({ to: "/" });
+      void navigate({ to: "/login", replace: true });
+    } else if (session && isAuthRoute) {
+      void navigate({ to: "/", replace: true });
     }
   }, [session, loading, isAuthRoute, navigate]);
 
@@ -34,21 +41,25 @@ export function AppShell() {
     );
   }
 
+  const showNav = Boolean(bubbleId);
+
   return (
     <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col bg-background">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-gradient-glow" />
-      <main className={`relative flex-1 ${isAuthRoute ? "" : "pb-28"}`}>
+      <main className={`relative flex-1 ${showNav || isDashboard || isAuthRoute ? (showNav ? "pb-28" : "pb-8") : "pb-28"}`}>
         <Outlet />
       </main>
-      {!isAuthRoute ? (
+      {showNav && bubbleId ? (
         <nav className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md px-4 pb-5">
           <div className="glass flex items-center justify-around rounded-full border border-border/60 px-2 py-2 shadow-soft">
             {tabs.map(({ to, icon: Icon, label }) => {
-              const active = pathname === to;
+              const path = to.replace("$bubbleId", bubbleId);
+              const active = to === "/vault/$bubbleId" ? pathname === path : pathname.startsWith(path);
               return (
                 <Link
                   key={to}
                   to={to}
+                  params={{ bubbleId }}
                   className={`flex flex-1 flex-col items-center gap-1 rounded-full px-3 py-2 transition-all ${
                     active ? "bg-gradient-gold text-gold-foreground shadow-gold" : "text-muted-foreground"
                   }`}

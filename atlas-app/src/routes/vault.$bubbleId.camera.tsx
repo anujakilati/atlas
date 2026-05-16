@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Mic, MicOff, Volume2, Maximize2, Play, Circle } from "lucide-react";
 import { useState } from "react";
 
-export const Route = createFileRoute("/camera")({
+export const Route = createFileRoute("/vault/$bubbleId/camera")({
   component: CameraPage,
   head: () => ({
     meta: [

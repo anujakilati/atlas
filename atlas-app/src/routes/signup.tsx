@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthCard } from "@/components/auth/AuthCard";
-import { signUp } from "@/lib/auth";
+import { formatAuthError, signUp } from "@/lib/auth";
 
 export const Route = createFileRoute("/signup")({
   component: SignUpPage,
@@ -31,7 +31,7 @@ function SignUpPage() {
         setSuccess("Account created. Check your email to confirm, then log in.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create account.");
+      setError(formatAuthError(err));
     } finally {
       setLoading(false);
     }
