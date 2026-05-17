@@ -10,6 +10,7 @@ import { bubbleTypeConfig } from "@/components/bubbles/bubble-styles";
 import { useGuardianEvents } from "@/hooks/use-guardian-events";
 import { SmartLockSequence } from "@/components/security/SmartLockSequence";
 import { EmergencyCallModal } from "@/components/security/EmergencyCallModal";
+import { NotificationToast } from "@/components/security/NotificationToast";
 import { fetchDeviceEvents, type DeviceEvent } from "@/lib/activities";
 import { isActionEvent } from "@/components/security/ActionsBadges";
 
@@ -51,8 +52,15 @@ function VaultHomePage() {
   const [deviceCount, setDeviceCount] = useState(0);
   const [recentEvents, setRecentEvents] = useState<DeviceEvent[]>([]);
 
-  const { smartLockEvent, emergencyCallEvent, dismissSmartLock, dismissEmergencyCall } =
-    useGuardianEvents(bubbleId);
+  const {
+    smartLockEvent,
+    emergencyCallEvent,
+    notifications,
+    dismissSmartLock,
+    dismissEmergencyCall,
+    dismissNotification,
+    clearNotifications,
+  } = useGuardianEvents(bubbleId);
 
   // Lock the door when Guardian AI triggers a smart lock
   useEffect(() => {
@@ -154,6 +162,12 @@ function VaultHomePage() {
       {emergencyCallEvent && (
         <EmergencyCallModal event={emergencyCallEvent} onDismiss={dismissEmergencyCall} />
       )}
+
+      <NotificationToast
+        notifications={notifications}
+        onDismiss={dismissNotification}
+        onClear={clearNotifications}
+      />
 
       <section className="mt-5 grid grid-cols-2 gap-3">
         <QuickAction

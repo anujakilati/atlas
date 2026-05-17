@@ -14,13 +14,19 @@ export type GuardianEvent = {
 type UseGuardianEventsReturn = {
   smartLockEvent: GuardianEvent | null;
   emergencyCallEvent: GuardianEvent | null;
+  notifications: GuardianEvent[];
   dismissSmartLock: () => void;
   dismissEmergencyCall: () => void;
+  dismissNotification: (id: string) => void;
+  clearNotifications: () => void;
 };
+
+const MAX_NOTIFICATIONS = 8;
 
 export function useGuardianEvents(bubbleId: string): UseGuardianEventsReturn {
   const [smartLockEvent, setSmartLockEvent] = useState<GuardianEvent | null>(null);
   const [emergencyCallEvent, setEmergencyCallEvent] = useState<GuardianEvent | null>(null);
+  const [notifications, setNotifications] = useState<GuardianEvent[]>([]);
 
   useEffect(() => {
     const channel = supabase
@@ -37,6 +43,12 @@ export function useGuardianEvents(bubbleId: string): UseGuardianEventsReturn {
           const row = payload.new as GuardianEvent;
           if (row.event_type === "smart_lock") setSmartLockEvent(row);
           if (row.event_type === "emergency_call") setEmergencyCallEvent(row);
+          if (row.event_type === "guardian_action") {
+            setNotifications((prev) => {
+              if (prev.some((n) => n.id === row.id)) return prev;
+              return [row, ...prev].slice(0, MAX_NOTIFICATIONS);
+            });
+          }
         },
       )
       .subscribe();
@@ -49,7 +61,11 @@ export function useGuardianEvents(bubbleId: string): UseGuardianEventsReturn {
   return {
     smartLockEvent,
     emergencyCallEvent,
+    notifications,
     dismissSmartLock: () => setSmartLockEvent(null),
     dismissEmergencyCall: () => setEmergencyCallEvent(null),
+    dismissNotification: (id: string) =>
+      setNotifications((prev) => prev.filter((n) => n.id !== id)),
+    clearNotifications: () => setNotifications([]),
   };
 }

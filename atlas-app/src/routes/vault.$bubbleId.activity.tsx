@@ -169,7 +169,7 @@ function ActivityPage() {
       .channel(`activity-events-${bubbleId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "device_events", filter: `bubble=eq.${bubbleId}` },
+        { event: "INSERT", schema: "public", table: "device_events" },
         () => { loadMoments(); loadCharacters(); },
       )
       .subscribe();
@@ -303,7 +303,11 @@ function ActivityPage() {
                               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                             </button>
                           )}
-                          <ActionsBadges incidentId={ev.id} allEvents={events} />
+                          <ActionsBadges
+                            incidentId={(ev.metadata?.incident_id as string | undefined) ?? ev.id}
+                            event={ev}
+                            allEvents={events}
+                          />
                         </div>
                       </li>
                     );

@@ -51,6 +51,9 @@ class ActionDispatcher:
     ) -> None:
         if not report.incident_confirmed:
             return
+        # False alarms are a no-op — Nemotron judged the footage as not a real incident.
+        if report.incident_type == "false_alarm":
+            return
         # Tier from risk_level; incident_type is passed through for display only
         candidate_actions = TIER_ACTIONS.get(report.risk_level, ["notify"])
         spec = ActionSpec(

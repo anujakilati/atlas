@@ -1,6 +1,6 @@
-import { Video } from "lucide-react";
 import type { Device } from "@/lib/devices";
 import { DeviceLivePlayer } from "./DeviceLivePlayer";
+import { SimulationGrid } from "./SimulationGrid";
 
 type Props = {
   devices: Device[];
@@ -9,18 +9,14 @@ type Props = {
 };
 
 export function CameraGridView({ devices, muted, onMutedChange }: Props) {
-  if (devices.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-border bg-card p-12 text-center">
-        <Video className="h-10 w-10 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">No cameras yet. Add a device and register it with a token.</p>
-      </div>
-    );
+  const realDevices = devices.filter((d) => !d.name.startsWith("Sim Cam "));
+  if (realDevices.length === 0) {
+    return <SimulationGrid />;
   }
 
   return (
-    <div className={`grid gap-3 ${devices.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
-      {devices.map((device) => (
+    <div className={`grid gap-3 ${realDevices.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+      {realDevices.map((device) => (
         <div key={device.id} className="flex flex-col gap-1">
           <div className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-border bg-black">
             <DeviceLivePlayer
