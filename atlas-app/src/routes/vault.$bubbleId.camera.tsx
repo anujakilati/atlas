@@ -11,6 +11,7 @@ import {
 import { CameraDeviceSelector } from "@/components/devices/CameraDeviceSelector";
 import { CameraIndividualView } from "@/components/devices/CameraIndividualView";
 import { CameraGridView } from "@/components/devices/CameraGridView";
+import { YoloWatchView } from "@/components/devices/YoloWatchView";
 
 export const Route = createFileRoute("/vault/$bubbleId/camera")({
   component: CameraPage,
@@ -22,7 +23,13 @@ export const Route = createFileRoute("/vault/$bubbleId/camera")({
   }),
 });
 
-type Tab = "individual" | "full";
+type Tab = "individual" | "full" | "simulation";
+
+const TAB_LABELS: Record<Tab, string> = {
+  individual: "Individual Live Feed",
+  full: "Full View",
+  simulation: "Simulation",
+};
 
 function pickActiveDevice(list: Device[], prev: Device | null): Device | null {
   if (prev && list.some((d) => d.id === prev.id)) return prev;
@@ -44,8 +51,11 @@ function CameraPage() {
   const refreshDevices = useCallback(() => {
     void fetchBubbleDevices(bubbleId)
       .then((list) => {
-        setDevices(list);
-        setActive((prev) => pickActiveDevice(list, prev));
+        // Hide synthetic sim cameras from the camera page selector / individual
+        // view — they're rendered as a 2x2 MJPEG grid in Full View instead.
+        const real = list.filter((d) => !d.name.startsWith("Sim Cam "));
+        setDevices(real);
+        setActive((prev) => pickActiveDevice(real, prev));
       })
       .catch(() => setDevices([]))
       .finally(() => setLoading(false));
@@ -111,7 +121,11 @@ function CameraPage() {
       <header>
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Live view</p>
         <h1 className="mt-1 font-display text-3xl">
-          {tab === "individual" ? (active?.name ?? "Cameras") : "All Cameras"}
+          {tab === "individual"
+            ? (active?.name ?? "Cameras")
+            : tab === "simulation"
+              ? "AI Simulation"
+              : "All Cameras"}
         </h1>
         {tab === "individual" && active ? (
           <p className="mt-0.5 text-sm text-muted-foreground">{active.placement}</p>
@@ -119,7 +133,7 @@ function CameraPage() {
       </header>
 
       <div className="mt-5 flex gap-2">
-        {(["individual", "full"] as Tab[]).map((t) => (
+        {(["individual", "full", "simulation"] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -130,7 +144,7 @@ function CameraPage() {
                 : "border-border bg-card text-muted-foreground"
             }`}
           >
-            {t === "individual" ? "Individual" : "Full View"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -139,6 +153,7 @@ function CameraPage() {
         {tab === "individual" ? (
           <CameraIndividualView
             active={active}
+            bubbleId={bubbleId}
             recordings={recordings}
             muted={muted}
             onMutedChange={setMuted}
@@ -148,21 +163,25 @@ function CameraPage() {
             deleteError={deleteRecordingError}
             loading={loading}
           />
-        ) : (
+        ) : tab === "full" ? (
           <CameraGridView devices={devices} muted={muted} onMutedChange={setMuted} />
+        ) : (
+          <YoloWatchView />
         )}
       </div>
 
-      <div className="mt-5">
-        <CameraDeviceSelector
-          devices={devices}
-          activeId={active?.id ?? null}
-          onSelect={setActive}
-          loading={loading || deletingDeviceId !== null}
-        />
-      </div>
+      {tab !== "simulation" ? (
+        <div className="mt-5">
+          <CameraDeviceSelector
+            devices={devices}
+            activeId={active?.id ?? null}
+            onSelect={setActive}
+            loading={loading || deletingDeviceId !== null}
+          />
+        </div>
+      ) : null}
 
-      {devices.length > 1 ? (
+      {tab !== "simulation" && devices.length > 1 ? (
         <p className="mt-2 text-center text-xs text-muted-foreground">
           Each camera needs its own device tab open with its token. Only one camera per browser.
         </p>

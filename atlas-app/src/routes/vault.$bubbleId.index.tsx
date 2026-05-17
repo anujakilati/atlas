@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Lock, Unlock, Wifi, Battery, Bell, UserPlus, ChevronRight, ShieldCheck, Video, Plus, ChevronLeft } from "lucide-react";
+import { Lock, Unlock, Wifi, Battery, Bell, UserPlus, ChevronRight, ShieldCheck, Video, Plus, ChevronLeft, AlertTriangle } from "lucide-react";
 import { AddMemberDialog } from "@/components/bubbles/AddMemberDialog";
 import { AddDeviceDialog } from "@/components/devices/AddDeviceDialog";
 import { fetchBubbleDevices } from "@/lib/devices";
@@ -7,6 +7,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import lockHero from "@/assets/lock-hero.jpg";
 import { fetchBubble, type BubbleType } from "@/lib/bubbles";
 import { bubbleTypeConfig } from "@/components/bubbles/bubble-styles";
+import { useGuardianEvents } from "@/hooks/use-guardian-events";
+import { SmartLockSequence } from "@/components/security/SmartLockSequence";
+import { EmergencyCallModal } from "@/components/security/EmergencyCallModal";
+import { NotificationToast } from "@/components/security/NotificationToast";
+import { fetchDeviceEvents, type DeviceEvent } from "@/lib/activities";
+import { isActionEvent } from "@/components/security/ActionsBadges";
 
 export const Route = createFileRoute("/vault/$bubbleId/")({
   component: VaultHomePage,
@@ -14,6 +20,27 @@ export const Route = createFileRoute("/vault/$bubbleId/")({
     meta: [{ title: "Vault" }],
   }),
 });
+
+const EVENT_LABELS: Record<string, string> = {
+  suspicious_person: "Suspicious Person",
+  suspicious_behavior: "Suspicious Behavior",
+  loitering: "Loitering",
+  theft: "Theft",
+  kidnapping: "Kidnapping",
+  trespassing: "Trespassing",
+  false_alarm: "False Alarm",
+  unknown_person: "Unknown Person",
+};
+
+function formatEventTitle(ev: DeviceEvent): string {
+  const raw = ev.event_type ?? "";
+  return EVENT_LABELS[raw] ?? (raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "Suspicious Event");
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
 
 function VaultHomePage() {
   const { bubbleId } = Route.useParams();
@@ -23,6 +50,34 @@ function VaultHomePage() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [deviceCount, setDeviceCount] = useState(0);
+  const [recentEvents, setRecentEvents] = useState<DeviceEvent[]>([]);
+
+  const {
+    smartLockEvent,
+    emergencyCallEvent,
+    notifications,
+    dismissSmartLock,
+    dismissEmergencyCall,
+    dismissNotification,
+    clearNotifications,
+  } = useGuardianEvents(bubbleId);
+
+  // Lock the door when Guardian AI triggers a smart lock
+  useEffect(() => {
+    if (smartLockEvent) setLocked(true);
+  }, [smartLockEvent]);
+
+  const loadRecentEvents = useCallback(() => {
+    void fetchDeviceEvents(bubbleId)
+      .then((evs) => {
+        const today = new Date().toDateString();
+        const incidents = evs
+          .filter((ev) => !isActionEvent(ev) && new Date(ev.created_at).toDateString() === today)
+          .slice(0, 5);
+        setRecentEvents(incidents);
+      })
+      .catch(() => {});
+  }, [bubbleId]);
 
   useEffect(() => {
     void fetchBubble(bubbleId)
@@ -36,7 +91,10 @@ function VaultHomePage() {
     void fetchBubbleDevices(bubbleId)
       .then((d) => setDeviceCount(d.length))
       .catch(() => setDeviceCount(0));
-  }, [bubbleId]);
+    loadRecentEvents();
+    const id = setInterval(loadRecentEvents, 30_000);
+    return () => clearInterval(id);
+  }, [bubbleId, loadRecentEvents]);
 
   const typeLabel = bubbleTypeConfig[bubbleType].label;
 
@@ -94,7 +152,22 @@ function VaultHomePage() {
           <h2 className="mt-1 font-display text-3xl">Main entrance</h2>
           <SlideToLock locked={locked} onToggle={() => setLocked((v) => !v)} />
         </div>
+        {smartLockEvent && (
+          <div className="px-4 pb-4">
+            <SmartLockSequence event={smartLockEvent} onDismiss={dismissSmartLock} />
+          </div>
+        )}
       </section>
+
+      {emergencyCallEvent && (
+        <EmergencyCallModal event={emergencyCallEvent} onDismiss={dismissEmergencyCall} />
+      )}
+
+      <NotificationToast
+        notifications={notifications}
+        onDismiss={dismissNotification}
+        onClear={clearNotifications}
+      />
 
       <section className="mt-5 grid grid-cols-2 gap-3">
         <QuickAction
@@ -152,11 +225,27 @@ function VaultHomePage() {
             View all <ChevronRight className="h-3 w-3" />
           </Link>
         </div>
-        <ul className="space-y-2">
-          <ActivityRow time="9:42 AM" title="Front door unlocked" who="Hanna · fingerprint" tone="success" />
-          <ActivityRow time="8:15 AM" title="Motion detected" who="Backyard camera" tone="muted" />
-          <ActivityRow time="7:03 AM" title="Unknown face flagged" who="Doorbell · AI alert" tone="danger" />
-        </ul>
+        {recentEvents.length === 0 ? (
+          <p className="text-center text-sm text-muted-foreground py-4">No suspicious activity today.</p>
+        ) : (
+          <ul className="space-y-2">
+            {recentEvents.map((ev) => (
+              <ActivityRow
+                key={ev.id}
+                time={formatTime(ev.created_at)}
+                title={formatEventTitle(ev)}
+                who={ev.risk_level ? `${ev.risk_level} risk` : "AI alert"}
+                tone={
+                  ev.risk_level === "high" || ev.risk_level === "critical"
+                    ? "danger"
+                    : ev.risk_level === "medium"
+                    ? "muted"
+                    : "muted"
+                }
+              />
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
@@ -245,9 +334,9 @@ function SlideToLock({ locked, onToggle }: { locked: boolean; onToggle: () => vo
         }}
       />
       <span
-        className="pointer-events-none absolute inset-0 flex items-center pl-5 font-medium"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 text-sm font-medium tracking-wide text-foreground/60"
         style={{
-          opacity: 1 - progress * 0.65,
+          opacity: 1 - progress * 0.8,
           transition: dragging ? "none" : "opacity 0.25s ease",
         }}
       >

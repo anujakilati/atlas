@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Sparkles, Plus, Baby, HeartPulse, UserX, Flame, PackageOpen, Dog } from "lucide-react";
-import { useState } from "react";
+import { Sparkles, Plus, Baby, HeartPulse, UserX, Flame, PackageOpen, Dog, Lock, Bell } from "lucide-react";
+import { useEffect, useState } from "react";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
+const SERVICE_KEY = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
 
 export const Route = createFileRoute("/vault/$bubbleId/commands")({
   component: CommandsPage,
@@ -20,6 +23,14 @@ type Cmd = {
   active: boolean;
 };
 
+type AIAction = {
+  id: string;
+  created_at: string;
+  event_type: string;
+  event_subtype: string | null;
+  metadata: Record<string, unknown>;
+};
+
 const initial: Cmd[] = [
   { icon: Baby, title: "Child unattended", rule: "Alert if a child isn't in view for 15 minutes", severity: "high", active: true },
   { icon: HeartPulse, title: "Person hurt", rule: "Alert if someone falls or doesn't move for 60s", severity: "critical", active: true },
@@ -35,9 +46,15 @@ const severityStyle: Record<Cmd["severity"], string> = {
   info: "bg-accent text-muted-foreground",
 };
 
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 function CommandsPage() {
+  const { bubbleId } = Route.useParams();
   const [cmds, setCmds] = useState(initial);
   const [draft, setDraft] = useState("");
+  const [aiActions, setAiActions] = useState<AIAction[]>([]);
 
   const toggle = (i: number) =>
     setCmds((c) => c.map((x, idx) => (idx === i ? { ...x, active: !x.active } : x)));
@@ -50,6 +67,32 @@ function CommandsPage() {
     ]);
     setDraft("");
   };
+
+  useEffect(() => {
+    if (!SUPABASE_URL || !SERVICE_KEY || !bubbleId) return;
+
+    const fetchActions = () => {
+      void fetch(
+        `${SUPABASE_URL}/rest/v1/device_events?select=id,created_at,event_type,event_subtype,metadata` +
+          `&bubble=eq.${bubbleId}` +
+          `&event_type=in.(guardian_action,camera_lock)` +
+          `&order=created_at.desc&limit=10`,
+        {
+          headers: {
+            apikey: SERVICE_KEY,
+            Authorization: `Bearer ${SERVICE_KEY}`,
+          },
+        },
+      )
+        .then((r) => (r.ok ? (r.json() as Promise<AIAction[]>) : Promise.resolve([])))
+        .then(setAiActions)
+        .catch(() => setAiActions([]));
+    };
+
+    fetchActions();
+    const id = setInterval(fetchActions, 15_000);
+    return () => clearInterval(id);
+  }, [bubbleId]);
 
   const activeCount = cmds.filter((c) => c.active).length;
 
@@ -103,7 +146,7 @@ function CommandsPage() {
         </div>
       </section>
 
-      {/* List */}
+      {/* Command list */}
       <section className="mt-7">
         <h2 className="mb-3 text-xs uppercase tracking-[0.2em] text-muted-foreground">Commands</h2>
         <ul className="space-y-2">
@@ -133,6 +176,56 @@ function CommandsPage() {
             );
           })}
         </ul>
+      </section>
+
+      {/* Recent AI Actions */}
+      <section className="mt-8 pb-8">
+        <h2 className="mb-3 text-xs uppercase tracking-[0.2em] text-muted-foreground">Recent AI Actions</h2>
+        {aiActions.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No actions taken yet. Guardian AI will respond here when incidents are detected.</p>
+        ) : (
+          <ul className="space-y-2">
+            {aiActions.map((a) => {
+              const isLock = a.event_type === "camera_lock";
+              const message =
+                (a.metadata?.message as string | undefined) ??
+                (isLock ? "Camera locked by Guardian AI" : "Notification sent");
+              const behavior = a.metadata?.person_behavior as string | undefined;
+              return (
+                <li
+                  key={a.id}
+                  className="rounded-2xl border border-border bg-card p-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                        isLock ? "bg-danger/15 text-danger" : "bg-gold/15 text-gold"
+                      }`}
+                    >
+                      {isLock ? <Lock className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-medium">
+                          {isLock ? "Camera locked" : "Notification sent"}
+                        </p>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {formatTime(a.created_at)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{message}</p>
+                      {behavior ? (
+                        <p className="mt-1 line-clamp-2 text-xs text-foreground/70 italic">
+                          "{behavior}"
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
     </div>
   );

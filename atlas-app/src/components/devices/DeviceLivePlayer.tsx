@@ -1,4 +1,4 @@
-import { Mic, MicOff, Volume2, Maximize2, Circle, Video } from "lucide-react";
+import { Mic, MicOff, Volume2, Maximize2, Circle, Video, Lock, Unlock } from "lucide-react";
 import { useDeviceStream } from "@/hooks/use-device-stream";
 import { useStorageLiveFeed } from "@/hooks/use-storage-live-feed";
 
@@ -9,6 +9,9 @@ type DeviceLivePlayerProps = {
   muted: boolean;
   onMutedChange: (muted: boolean) => void;
   showControls?: boolean;
+  locked?: boolean;
+  lockMessage?: string;
+  onUnlock?: () => void;
 };
 
 /** Key by deviceId so switching cameras fully resets WebRTC. */
@@ -19,6 +22,9 @@ export function DeviceLivePlayer({
   muted,
   onMutedChange,
   showControls = true,
+  locked = false,
+  lockMessage = "Locked by Guardian AI — suspicious activity detected",
+  onUnlock,
 }: DeviceLivePlayerProps) {
   const { videoRef, hasMedia, waiting, error } = useDeviceStream(deviceId, "viewer");
   const storageLiveSrc = useStorageLiveFeed(deviceId, deviceOnline && !hasMedia);
@@ -86,7 +92,7 @@ export function DeviceLivePlayer({
         </p>
       ) : null}
 
-      {showControls ? (
+      {showControls && !locked ? (
         <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between p-4">
           <button
             type="button"
@@ -107,6 +113,25 @@ export function DeviceLivePlayer({
           >
             <Maximize2 className="h-4 w-4" />
           </button>
+        </div>
+      ) : null}
+
+      {locked ? (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 rounded-[inherit] border-2 border-danger bg-black/70 p-6 text-center backdrop-blur-sm">
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-danger/20 text-danger">
+            <Lock className="h-6 w-6" />
+          </span>
+          <p className="text-sm font-medium text-white">{lockMessage}</p>
+          {onUnlock ? (
+            <button
+              type="button"
+              onClick={onUnlock}
+              className="mt-1 flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs text-white transition hover:bg-white/20"
+            >
+              <Unlock className="h-3.5 w-3.5" />
+              Unlock camera
+            </button>
+          ) : null}
         </div>
       ) : null}
     </>

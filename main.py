@@ -13,6 +13,7 @@ import sys
 import argparse
 import asyncio
 import subprocess
+import threading
 from pathlib import Path
 
 import cv2
@@ -28,6 +29,8 @@ from pipeline.event_buffer.rolling_buffer import RollingBuffer
 from pipeline.clip_generation.clip_builder import ClipBuilder
 from pipeline.nemotron_reasoning.engine import NemotronEngine, IncidentPayload
 from pipeline.notifications.alerts import generate as make_notifications
+from pipeline.action_agent.dispatcher import ActionDispatcher
+from pipeline.action_agent.executor import NemoClawExecutor
 from pipeline.display.monitor import SurveillanceMonitor, DISPLAY_W, VIDEO_W, VIDEO_H
 from backend.pipelines.pipeline import CCTVPipeline
 from backend.reports.generator import generate_report, report_markdown
@@ -37,8 +40,11 @@ from backend.storage import db
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-# Default: honor `VIDEO_PATH` from environment if present, otherwise use bundle default
-VIDEO_PATH = os.getenv("VIDEO_PATH", "videos/nishan-kidnap.MOV")
+VIDEO_PATH      = os.getenv("VIDEO_PATH", "videos/sus-walking.MOV")
+_SB_URL         = os.getenv("VITE_SUPABASE_URL", "").rstrip("/")
+_SB_KEY         = os.getenv("SUPABASE_SERVICE_KEY", "")
+_BUBBLE_ID      = os.getenv("BUBBLE_ID", "")
+_DEVICE_ID      = os.getenv("DEVICE_ID", "")
 OUTPUT_DIR = Path("detection_results/pipeline")
 
 # Protected zone in original 1920×1080 coords — covers the table area.
@@ -55,11 +61,92 @@ inventory = ObjectInventory()
 zone      = ProtectedZone(*ROI)
 nemotron  = NemotronEngine()
 monitor   = SurveillanceMonitor()
+
+_action_dispatcher = ActionDispatcher()
+if _SB_URL and _SB_KEY:
+    _executor = NemoClawExecutor(_SB_URL, _SB_KEY, _BUBBLE_ID or None)
+    _action_dispatcher.set_executor(_executor)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Shared session state (modified by Nemotron callback) ──────────────────────
 _session: InteractionSession | None = None
 _last_report = None
+_pending_clips: dict[str, str | None] = {}  # incident_id → local clip path
+
+
+def _upload_clip(clip_path: str, incident_id: str) -> str | None:
+    """Upload a clip MP4 to Supabase Storage `replays` bucket; return public URL."""
+    if not _SB_URL or not _SB_KEY:
+        return None
+    try:
+        import requests as req
+        bucket   = "replays"
+        filename = f"event_{incident_id}_replay.mp4"
+        headers  = {
+            "apikey": _SB_KEY,
+            "Authorization": f"Bearer {_SB_KEY}",
+            "Content-Type": "video/mp4",
+        }
+        # Ensure bucket exists
+        req.post(f"{_SB_URL}/storage/v1/bucket",
+                 headers={**headers, "Content-Type": "application/json"},
+                 json={"id": bucket, "name": bucket, "public": True},
+                 timeout=10)
+        # Upload
+        with open(clip_path, "rb") as f:
+            resp = req.post(
+                f"{_SB_URL}/storage/v1/object/{bucket}/{filename}",
+                headers={**headers, "x-upsert": "true"},
+                data=f, timeout=60,
+            )
+        resp.raise_for_status()
+        return f"{_SB_URL}/storage/v1/object/public/{bucket}/{filename}"
+    except Exception as e:
+        print(f"⚠  Clip upload failed: {e}")
+        return None
+
+
+def _push_device_event(report, replay_url: str | None) -> None:
+    """Insert a device_events row into Supabase (runs in a background thread)."""
+    if not _SB_URL or not _SB_KEY or not _BUBBLE_ID:
+        if not _BUBBLE_ID:
+            print("⚠  BUBBLE_ID not set — skipping Supabase event push")
+        return
+    try:
+        import requests as req
+        row = {
+            "bubble": _BUBBLE_ID,
+            "event_type": report.incident_type,
+            "event_subtype": report.incident_type,
+            "risk_level": report.risk_level,
+            "confidence": round(float(report.confidence), 4),
+            "incident_confirmed": report.incident_confirmed,
+            "metadata": {
+                "source": "live_monitor",
+                "incident_id": report.incident_id,
+                "summary": report.summary,
+                "recommended_action": report.recommended_action,
+                "objects_involved": report.objects_involved,
+                "person_behavior": report.person_behavior,
+                **({"replay_url": replay_url} if replay_url else {}),
+            },
+        }
+        if _DEVICE_ID:
+            row["device"] = _DEVICE_ID
+        headers = {
+            "apikey": _SB_KEY,
+            "Authorization": f"Bearer {_SB_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        resp = req.post(f"{_SB_URL}/rest/v1/device_events",
+                        headers=headers, json=row, timeout=10)
+        if resp.status_code in (200, 201):
+            print(f"✓ Event pushed to Supabase  replay={'yes' if replay_url else 'no'}")
+        else:
+            print(f"⚠  Supabase event insert {resp.status_code}: {resp.text[:120]}")
+    except Exception as e:
+        print(f"⚠  Supabase push error: {e}")
 
 
 def run_batch(video_path: str):
@@ -76,16 +163,16 @@ def run_batch(video_path: str):
     frames_dir = CONFIG['storage']['frames_dir']
     if os.path.exists(frames_dir):
         import shutil
-        shutil.rmtree(frames_dir)
+        shutil.rmtree(frames_dir, ignore_errors=True)
         print(f"✓ Cleared old frames: {frames_dir}")
-    
+
     # Clear old replay files to force fresh generation
     replay_dir = CONFIG['storage'].get('clips_dir', './storage/clips')
     if replay_dir:
         replay_dir = os.path.join(replay_dir, 'replay')
         if os.path.exists(replay_dir):
             import shutil
-            shutil.rmtree(replay_dir)
+            shutil.rmtree(replay_dir, ignore_errors=True)
             print(f"✓ Cleared old replays: {replay_dir}")
     
     # Initialize fresh database
@@ -136,6 +223,23 @@ def on_nemotron_result(report):
     print(f"  PUSH      : {notifs['short']}")
     print(f"{'='*62}\n")
 
+    # Upload clip + push to Supabase in background (non-blocking)
+    clip_path = _pending_clips.pop(report.incident_id, None)
+    def _bg():
+        replay_url = None
+        if clip_path and os.path.exists(clip_path):
+            print(f"↑  Uploading clip {clip_path} ...")
+            replay_url = _upload_clip(clip_path, report.incident_id)
+        _push_device_event(report, replay_url)
+    threading.Thread(target=_bg, daemon=True).start()
+
+    # Dispatch to action agent (non-blocking)
+    _action_dispatcher.dispatch_async(
+        report,
+        device_id=_DEVICE_ID or None,
+        bubble_id=_BUBBLE_ID or None,
+    )
+
 
 def _fire_nemotron(session: InteractionSession, buffer: RollingBuffer,
                    builder: ClipBuilder, video_ts: float,
@@ -157,8 +261,11 @@ def _fire_nemotron(session: InteractionSession, buffer: RollingBuffer,
     if montage:
         print(f"   montage → {montage}")
 
+    incident_id = f"{session.session_id}_{session.nemotron_calls}"
+    _pending_clips[incident_id] = str(clip_path) if clip_path else None
+
     payload = IncidentPayload(
-        incident_id=f"{session.session_id}_{session.nemotron_calls}",
+        incident_id=incident_id,
         suspicion_score=session.peak_suspicion,
         timeline=[
             {"frame": b.frame_num, "ts": round(b.video_ts, 2),
@@ -188,16 +295,17 @@ def _fire_nemotron(session: InteractionSession, buffer: RollingBuffer,
 def run():
     global _session
 
-    cap = cv2.VideoCapture(VIDEO_PATH)
+    _src = int(VIDEO_PATH) if str(VIDEO_PATH).isdigit() else VIDEO_PATH
+    cap = cv2.VideoCapture(_src)
     if not cap.isOpened():
         print(f"❌ Cannot open {VIDEO_PATH}"); return
 
-    fps     = cap.get(cv2.CAP_PROP_FPS)
-    total   = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    orig_w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    orig_h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    _src_label = f"webcam {VIDEO_PATH}" if str(VIDEO_PATH).isdigit() else VIDEO_PATH
 
-    print(f"🎬 {orig_w}×{orig_h} @ {fps:.0f} FPS — {total} frames ({total/fps:.1f}s)")
+    print(f"🎬 {orig_w}×{orig_h} @ {fps:.0f} FPS — {_src_label}  (live)")
     print(f"🛡  ROI: {ROI}   Grid: {inventory.GRID_ROWS}×{inventory.GRID_COLS} cells")
     print(f"📺 Display: {DISPLAY_W}×{VIDEO_H}   Q=quit  Space=pause\n")
 
@@ -220,25 +328,18 @@ def run():
 
     while True:
         if not paused:
-            # ── Wall-clock frame targeting ─────────────────────────────────
-            elapsed      = time.monotonic() - play_start - pause_debt
-            target_frame = int(elapsed * fps) % total
-            cur_pos      = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-
-            if target_frame - cur_pos > 1:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-            elif target_frame < cur_pos - 5:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
+            # ── Sequential live read ───────────────────────────────────────
             ret, frame = cap.read()
             if not ret:
-                play_start = time.monotonic(); pause_debt = 0.0
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                print("⚠  Stream lost — reconnecting in 2s...")
+                cap.release()
+                time.sleep(2)
+                cap = cv2.VideoCapture(_src)
                 continue
 
-            frame_num = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
-            video_ts  = frame_num / fps
-            vis       = frame
+            frame_num += 1
+            video_ts   = time.monotonic() - play_start - pause_debt
+            vis        = frame
 
             # ── YOLO (time-gated) ──────────────────────────────────────────
             now_mono = time.monotonic()
@@ -387,8 +488,8 @@ def run():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Atlas AI surveillance on a video file")
-    parser.add_argument("-v", "--video", help="Path to input video file to analyze")
+    parser = argparse.ArgumentParser(description="Run Atlas AI surveillance (live stream or video file)")
+    parser.add_argument("-v", "--video", help="Webcam index (0), RTSP URL, or path to a video file")
     parser.add_argument("--batch", action="store_true",
                         help="Run the batch analyzer, print a report, and generate replay")
     parser.add_argument("--dry-run", action="store_true", help="Print chosen video and exit without running")

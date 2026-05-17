@@ -28,6 +28,7 @@ if _env_path.exists():
 from backend.storage import db
 from backend.config import CONFIG
 from backend.utils.logger import get_logger
+from scripts.yolo_watch import start_server, stop_server, push_frame
 import cv2
 import numpy as np
 
@@ -577,43 +578,49 @@ def push_to_supabase(profile, event_meta, replay_path, crop_url=None, score=0.0,
     headers = _supabase_headers(key)
     return_headers = {**headers, "Prefer": "return=representation"}
 
-    # 1. Resolve bubble ID — use env override or fetch first bubble from Supabase
-    bubble_id = os.environ.get("BUBBLE_ID")
-    if not bubble_id:
+    # 1. Resolve bubble IDs — env override targets a single bubble; otherwise
+    # insert one event row per bubble so it surfaces regardless of which one
+    # the UI is currently viewing.
+    env_bubble = os.environ.get("BUBBLE_ID")
+    bubble_ids: list[str] = []
+    if env_bubble:
+        bubble_ids = [env_bubble]
+    else:
         try:
-            r = req.get(f"{sb_url}/rest/v1/bubbles?select=id&limit=1", headers=headers, timeout=10)
+            r = req.get(f"{sb_url}/rest/v1/bubbles?select=id", headers=headers, timeout=10)
             r.raise_for_status()
-            rows = r.json()
-            bubble_id = rows[0]["id"] if rows else None
-            if not bubble_id:
-                print(f"[Supabase] bubble table returned no rows — check RLS or table name")
+            bubble_ids = [row["id"] for row in r.json() if row.get("id")]
+            if not bubble_ids:
+                print("[Supabase] bubble table returned no rows — check RLS or table name")
         except Exception as e:
-            print(f"[Supabase] Could not fetch bubble ID: {e}")
+            print(f"[Supabase] Could not fetch bubble IDs: {e}")
 
-    if not bubble_id:
+    if not bubble_ids:
         print("[Supabase] Skipping device_events insert — no bubble ID available")
     else:
-        event_row = {
-            "bubble": bubble_id,
-            "event_type": "suspicious_person",
-            "event_subtype": event_meta.get("label", "character_profile_generated"),
-            "risk_level": "high" if score >= 0.8 else "medium" if score >= 0.5 else "low",
-            "confidence": round(float(score), 4),
-            "incident_confirmed": True,
-            "metadata": {
-                "source": event_meta.get("source"),
-                "replay_path": replay_path,
-                "replay_url": replay_url,
-                "profile_crop_url": crop_url,
-                "character_profile": profile or {},
-            },
-        }
-        try:
-            resp = req.post(f"{sb_url}/rest/v1/device_events", headers=return_headers, json=event_row, timeout=10)
-            resp.raise_for_status()
-            print("[Supabase] device_events row inserted.")
-        except Exception as e:
-            print(f"[Supabase] Failed to insert device_event: {e} — response: {getattr(e, 'response', None) and e.response.text}")
+        for bubble_id in bubble_ids:
+            event_row = {
+                "bubble": bubble_id,
+                "event_type": "suspicious_person",
+                "event_subtype": event_meta.get("label", "character_profile_generated"),
+                "risk_level": "high" if score >= 0.8 else "medium" if score >= 0.5 else "low",
+                "confidence": round(float(score), 4),
+                "incident_confirmed": True,
+                "metadata": {
+                    "source": event_meta.get("source"),
+                    "replay_path": replay_path,
+                    "replay_url": replay_url,
+                    "profile_crop_url": crop_url,
+                    "character_profile": profile or {},
+                },
+            }
+            try:
+                resp = req.post(f"{sb_url}/rest/v1/device_events", headers=return_headers, json=event_row, timeout=10)
+                resp.raise_for_status()
+                print(f"[Supabase] device_events row inserted for bubble {bubble_id}.")
+            except Exception as e:
+                resp_text = getattr(e, "response", None) and e.response.text
+                print(f"[Supabase] Failed to insert device_event for bubble {bubble_id}: {e} — response: {resp_text}")
 
     # 2. Deduplicate then insert character
     if is_duplicate_character(profile, cropped_frame, sb_url, key):
@@ -739,8 +746,9 @@ def main():
         # Increase pre-event padding to give more lead-in before the suspicious activity.
         window_before = int(source_fps * 5.0)
         window_after = int(source_fps * 2.0)
-        start_frame = max(0, int(frame_index) - window_before)
-        end_frame = min(total_frames - 1, int(frame_index) + window_after)
+        clamped_index = min(int(frame_index), total_frames - 1)
+        start_frame = max(0, clamped_index - window_before)
+        end_frame = min(total_frames - 1, clamped_index + window_after)
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         ok, sample = cap.read()
@@ -760,6 +768,8 @@ def main():
         best_clarity = {"score": 0.0, "frame": None, "bbox": None}
         devnull_out = open(os.devnull, 'w')
         devnull_err = open(os.devnull, 'w')
+
+        mjpeg_server = start_server()
         try:
             with contextlib.redirect_stdout(devnull_out), contextlib.redirect_stderr(devnull_err):
                 while current <= end_frame:
@@ -795,10 +805,17 @@ def main():
                         tracked_suspects = next_tracked[:]
 
                     writer.write(frame_out)
+
+                    # Stream annotated frame to the Simulation tab
+                    enc_ok, jpeg_buf = cv2.imencode('.jpg', frame_out, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if enc_ok:
+                        push_frame(jpeg_buf.tobytes())
+
                     current += 1
         finally:
             devnull_out.close()
             devnull_err.close()
+            stop_server(mjpeg_server)
         writer.release()
         cap.release()
 
